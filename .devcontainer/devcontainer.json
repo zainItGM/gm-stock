@@ -1,0 +1,11 @@
+{
+  "name": "GM Stone stock test",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "Stone test site", "onAutoForward": "openBrowser" }
+  },
+  // Every time the Codespace is opened: stop any old test server, get the latest code,
+  // and start the test server in watch mode, so it restarts by itself whenever the code changes.
+  "postAttachCommand": "pkill -f test-server.mjs; git pull --ff-only origin main || echo 'Could not update automatically; the test site uses the code already here.'; node --watch test-server.mjs"
+}

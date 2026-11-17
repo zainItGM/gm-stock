@@ -1,0 +1,12 @@
+{
+  "name": "gm-stone-portal",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "11.1.9"
+  },
+  "scripts": {
+    "test-site": "node test-server.mjs",
+    "deploy": "git pull --ff-only origin main && npm install --no-audit --no-fund && npx --yes netlify-cli deploy --prod"
+  }
+}
