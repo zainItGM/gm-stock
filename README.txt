@@ -5,7 +5,7 @@ site/index.html        the public catalogue (reads the live catalogue from /api/
                        to the copy built into the page if the function is ever unavailable)
 site/img/              the page's photos (HASH.jpg, named after the photo itself)
 site/admin/index.html  the admin portal  ->  https://<the site>/admin/
-netlify/functions/     one function, api.mjs: login, live data, photo upload and photo serving
+netlify/functions/     one function, api.mjs: login, live data, history, photo upload and serving
 tools/                 helper script (see the end of this file)
 netlify.toml           tells Netlify what to publish
 
@@ -42,11 +42,37 @@ The admin:
   To order   the "brought in to order" catalogue: always-available classics, new selections.
   Projects   the projects tab: name, location, type, stone, scope, Instagram reel, photos.
              Map pins on the site are matched to projects by position, so add new ones at the end.
+  History    every save, newest first (the last 40 are kept). See below.
   Settings   enquiry email and WhatsApp number, JSON backup / restore, sign out.
 
-Photos: paste a Google Drive link or file ID (shared as "anyone with the link can view"), or
-upload a picture. Uploads are resized to 1600 px in the browser and stored online in Netlify
-Blobs (served from /api/img/...). Photos built into the page stay in site/img/.
+Photos: stock items, to-order items and projects have one photo list. The first photo is the
+main one (the card photo; for projects the cover); the rest show, in this order, when a visitor
+opens the item. Under each photo: arrows to move it earlier or later, "Make main", and remove.
+Add photos by pasting a Google Drive link or file ID (shared as "anyone with the link can view"),
+or upload several at once. Uploads are resized to 1600 px in the browser and stored online in
+Netlify Blobs (served from /api/img/...). Photos built into the page stay in site/img/.
+Cargo bundles have one photo each.
+
+Hide from site: "Hide from site" (in the item's edit panel; "Hide block" on a cargo block) takes
+an item off the website but keeps it in the admin with all its details and photos, marked
+"Hidden from site". "Put back on site" shows it again. Works for stock, cargo blocks, single
+bundles, to-order items, and projects added after the ones with a map pin. The projects that
+have a pin can't be hidden, because the pins open projects by their place in the list.
+The "Hidden from site" button above a list shows just the hidden items. "Delete" still removes
+an item for good.
+
+History and undo: after every save a message shows with "Undo" for a few seconds. The History
+page lists every save with what changed; "Undo last change" goes back one step, and "Compare &
+put back" on any row first shows, in plain words, what putting that version back would change,
+then does it. Putting a version back is saved like any other change, so it can be undone too.
+
+Excel: "Download Excel" (Overview, Cargo, Stock, To order) downloads what is saved now:
+  Stock           every Dubai stock item: material, category, finish, origin, m², slabs, slab
+                  size, average slab, special price, flags, position, status, photos, description
+  Cargo bundles   every bundle: block, bundle, material, status (arriving / arrived / hidden),
+                  slabs, m², net sizes, size on the card, photo, book-match, hot
+  To order        the order catalogue with availability, selection, flags, status, photos
+  Summary         the totals the website shows (hidden items left out), and how many are hidden
 
 Saving: every change is saved as one whole catalogue. If two people save at the same moment,
 the second one is refused and the admin reloads, so nothing is overwritten silently.
