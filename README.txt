@@ -34,10 +34,10 @@ That copies the catalogue built into the page into the live store. From then on 
 change in the admin shows on the site straight away, with no redeploy.
 
 The admin:
-  Cargo      blocks and their bundles. "Mark arrived" moves a block from arriving cargo to
-             the in-stock section with one click. Bundles take net sizes (width x length x pcs);
-             "Calculate" fills in m² and slab count from them.
-  Stock      slabs in Dubai: m², slabs, slab size, finish, description, origin, position in
+  Cargo      blocks and their bundles. "Move to stock…" moves arrived cargo into stock (see
+             below). Bundles take net sizes (width x length x pcs); "Calculate" fills in m² and
+             slab count from them.
+  Stock      slabs held in the Dubai showroom or the Sharjah factory ("Held at" filter): m², slabs, slab size, finish, description, origin, position in
              the list, special price, hot flag, main photo and gallery. Delete when sold.
   To order   the "brought in to order" catalogue: always-available classics, new selections.
   Projects   the projects tab: name, location, type, stone, scope, Instagram reel, photos.
@@ -53,6 +53,16 @@ or upload several at once. Uploads are resized to 1600 px in the browser and sto
 Netlify Blobs (served from /api/img/...). Photos built into the page stay in site/img/.
 Cargo bundles have one photo each.
 
+Moving cargo into stock: when a container lands, press "Move to stock…" on its block.
+Choose where it went (Dubai showroom or Sharjah factory), tick the bundles (untick some to
+split a block between the two), and put them into a new stock item or add them to an existing
+one at that place. m², slabs, slab sizes and photos are carried over; the bundle numbers go into
+the description, so visitors can still search for them on the site. Moved bundles leave Cargo
+(the whole block when all are moved). A new item with no photo is saved hidden from the site
+until a photo is added. On the site the card shows "Dubai showroom" or "Sharjah factory", and
+its "Where it is held" filter works with it. To move stock between the two later, change
+"Where it is held" in the stock item.
+
 Hide from site: "Hide from site" (in the item's edit panel; "Hide block" on a cargo block) takes
 an item off the website but keeps it in the admin with all its details and photos, marked
 "Hidden from site". "Put back on site" shows it again. Works for stock, cargo blocks, single
@@ -67,12 +77,13 @@ put back" on any row first shows, in plain words, what putting that version back
 then does it. Putting a version back is saved like any other change, so it can be undone too.
 
 Excel: "Download Excel" (Overview, Cargo, Stock, To order) downloads what is saved now:
-  Stock           every Dubai stock item: material, category, finish, origin, m², slabs, slab
+  Stock           every stock item: material, category, finish, origin, where it is held, m², slabs, slab
                   size, average slab, special price, flags, position, status, photos, description
   Cargo bundles   every bundle: block, bundle, material, status (arriving / arrived / hidden),
                   slabs, m², net sizes, size on the card, photo, book-match, hot
   To order        the order catalogue with availability, selection, flags, status, photos
-  Summary         the totals the website shows (hidden items left out), and how many are hidden
+  Summary         the totals the website shows, per place (showroom / factory), hidden items
+                  left out, and how many are hidden
 
 Saving: every change is saved as one whole catalogue. If two people save at the same moment,
 the second one is refused and the admin reloads, so nothing is overwritten silently.

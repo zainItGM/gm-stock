@@ -200,6 +200,14 @@ td .sub{color:var(--muted);font-size:12.5px;max-width:42ch;overflow:hidden;text-
 .padd{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px}
 .padd input{flex:1 1 200px}
 
+/* move to stock */
+.seg{display:flex;gap:8px;flex-wrap:wrap}
+.seg label{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);padding:9px 14px;cursor:pointer;font-weight:500}
+.seg label:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.seg input{accent-color:var(--accent);margin:0}
+.mvlots{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);background:var(--surface);padding:10px 12px;max-height:240px;overflow:auto}
+.bar .lab{font-family:var(--m);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+
 /* history */
 .diff{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:var(--ink)}
 .diff b{font-weight:600}
@@ -364,8 +372,8 @@ async function setupFromSite(prog){
 
 /* ============================ routing & render ============================ */
 const VIEWS={overview:"Overview",cargo:"Cargo",stock:"Stock",order:"To order",projects:"Projects",history:"History",settings:"Settings"};
-let curView="overview", q="", cat="All", onlyHidden=false;
-function route(){ const h=(location.hash||"#overview").slice(1); curView=VIEWS[h]?h:"overview"; q=""; cat="All"; onlyHidden=false; render(); window.scrollTo(0,0); }
+let curView="overview", q="", cat="All", onlyHidden=false, locF="All";
+function route(){ const h=(location.hash||"#overview").slice(1); curView=VIEWS[h]?h:"overview"; q=""; cat="All"; onlyHidden=false; locF="All"; render(); window.scrollTo(0,0); }
 window.addEventListener("hashchange",route);
 function render(){
   if($("#app").hidden) return;
@@ -388,6 +396,8 @@ function searchBar(ph,items,catOf,isHidden){
 }
 function wireBar(){ const i=$("#q"); if(i){ i.oninput=()=>{ q=i.value.toLowerCase(); render(); const j=$("#q"); if(j){ j.focus(); j.setSelectionRange(j.value.length,j.value.length);} }; } document.querySelectorAll(".chip[data-cat]").forEach(b=>b.onclick=()=>{ cat=b.dataset.cat; render(); }); const h=document.querySelector(".chip[data-hid]"); if(h) h.onclick=()=>{ onlyHidden=!onlyHidden; render(); }; }
 const inHid=h=>!onlyHidden||!!h;
+const inLocF=l=>locF==="All"||(locF==="Sharjah")===isFactory(l);
+const locChips=items=>{ const nf=items.filter(s=>isFactory(s.loc)).length; return `<div class="bar"><span class="lab">Held at</span><div class="chips">${[["All","Both",items.length],["Dubai","Dubai showroom",items.length-nf],["Sharjah","Sharjah factory",nf]].map(([v,t,n])=>`<button class="chip${locF===v?" on":""}" data-lf="${v}">${t}<small>${n}</small></button>`).join("")}</div></div>`; };
 const hit=(...f)=>!q||f.join(" ").toLowerCase().includes(q);
 const inCat=c=>cat==="All"||c===cat;
 function thumb(src,alt){ return src?`<img class="thumb" src="${esc(src)}" alt="${esc(alt||"")}" loading="lazy" referrerpolicy="no-referrer">`:`<span class="thumb none">no photo</span>`; }
@@ -417,6 +427,7 @@ function rOverview(){
   const stock=d.STOCK.filter(onSite), order=d.ORDER.filter(onSite), projects=d.PROJECTS.filter(onSite);
   const stockM2=stock.reduce((a,s)=>a+(+s.m2||0),0)+arrived.reduce((a,b)=>a+lotTotSite(b).m2,0);
   const stockPcs=stock.reduce((a,s)=>a+(+s.pcs||0),0)+arrived.reduce((a,b)=>a+lotTotSite(b).pcs,0);
+  const facM2=stock.filter(s=>isFactory(s.loc)).reduce((a,s)=>a+(+s.m2||0),0);
   const arrM2=arriving.reduce((a,b)=>a+lotTotSite(b).m2,0), arrPcs=arriving.reduce((a,b)=>a+lotTotSite(b).pcs,0);
   const noPhoto=stock.filter(s=>!s.img).length+blocks.reduce((a,b)=>a+lotsOnSite(b).filter(l=>!l.img).length,0);
   const hidden=d.STOCK.filter(x=>x.hidden).length+d.ORDER.filter(x=>x.hidden).length+d.PROJECTS.filter(x=>x.hidden).length
@@ -424,6 +435,8 @@ function rOverview(){
   $("#view").innerHTML=head("Overview","What the website shows right now. Changes made here go live as soon as they are saved.",`<button class="btn" id="xls">Download Excel</button><a class="btn" href="/" target="_blank" rel="noopener">View website ↗</a>`)+
   `<div class="tiles">
     <div class="tile"><i>m² in stock</i><b class="num">${fmt0(stockM2)}</b></div>
+    <div class="tile"><i>Dubai showroom</i><b class="num">${fmt0(stockM2-facM2)}<small>m²</small></b></div>
+    <div class="tile"><i>Sharjah factory</i><b class="num">${fmt0(facM2)}<small>m²</small></b></div>
     <div class="tile"><i>Slabs in stock</i><b class="num">${fmt0(stockPcs)}</b></div>
     <div class="tile"><i>m² arriving</i><b class="num">${fmt0(arrM2)}<small>${fmt0(arrPcs)} slabs</small></b></div>
     <div class="tile"><i>Blocks arriving</i><b class="num">${arriving.length}</b></div>
@@ -461,6 +474,7 @@ function rCargo(){
   document.querySelectorAll("[data-el]").forEach(b=>b.onclick=()=>editLot(+b.dataset.eb2,+b.dataset.el));
   document.querySelectorAll("[data-al]").forEach(b=>b.onclick=()=>editLot(+b.dataset.al,-1));
   document.querySelectorAll("[data-arr]").forEach(b=>b.onclick=async()=>{ const B=state.data.DATA[+b.dataset.arr]; B.arrived=!B.arrived; if(B.arrived) B.new=false; await commit((B.arrived?"Marked arrived: ":"Marked arriving: ")+(B.title||"Block "+B.block)); });
+  document.querySelectorAll("[data-mv]").forEach(b=>b.onclick=()=>moveBlock(+b.dataset.mv));
   document.querySelectorAll("[data-hb]").forEach(b=>b.onclick=async()=>{ const B=state.data.DATA[+b.dataset.hb]; if(B.hidden) delete B.hidden; else B.hidden=true; await commit((B.hidden?"Hidden from site: ":"Put back on site: ")+(B.title||"Block "+B.block)); });
 }
 function blockCard(B,i,tag){
@@ -468,22 +482,23 @@ function blockCard(B,i,tag){
   return `<div class="block${B.hidden?" off":""}"><div class="bh"><h3>${esc(B.title||"Block "+B.block)}</h3><span class="meta">${esc(B.material)} · ${esc(B.cat)}</span>
     ${B.hidden?offPill:`<span class="pill ${tag}">${B.arrived?"Arrived":"Arriving"}</span>`}${B.new?`<span class="pill acc">New</span>`:""}${B.hot?`<span class="pill acc">★ Hot</span>`:""}${B.seq?`<span class="pill">Book-match</span>`:""}
     <span class="meta num">${fmt(t.m2)} m² · ${t.pcs} slabs · ${lots.length-nh} bundle${lots.length-nh===1?"":"s"}${nh?` · ${nh} hidden`:""}</span>
-    <span class="sp"><button class="btn sm ghost" data-hb="${i}">${B.hidden?"Put back on site":"Hide block"}</button><button class="btn sm ghost" data-arr="${i}">${B.arrived?"Mark arriving":"Mark arrived"}</button><button class="btn sm" data-eb="${i}">Edit block</button></span></div>
+    <span class="sp"><button class="btn sm ghost" data-hb="${i}">${B.hidden?"Put back on site":"Hide block"}</button><button class="btn sm amber" data-mv="${i}">Move to stock…</button><button class="btn sm" data-eb="${i}">Edit block</button></span></div>
     <div class="lots">${lots.map((l,j)=>`<button class="lot${l.hidden?" off":""}" data-eb2="${i}" data-el="${j}">${thumb(l.img,"Bundle "+l.id)}<span><span class="id">Bundle ${esc(l.id)}</span>${l.hidden?` <span class="pill bad">Hidden</span>`:""}<br><span class="sz">${(l.net||[]).map(n=>`${n[0]} × ${n[1]} cm × ${n[2]}`).join(" · ")||"no sizes"}</span><div class="ar num">${fmt(l.m2)} <small>m² · ${l.pcs} slabs</small></div></span></button>`).join("")}<button class="addlot" data-al="${i}">+ Add bundle</button></div></div>`;
 }
 
 /* ---------------- stock ---------------- */
 function rStock(){
   const all=state.data.STOCK.map((s,i)=>({s,i})).sort((a,b)=>((a.s.grp||3)-(b.s.grp||3))||(a.i-b.i));
-  const vis=all.filter(({s})=>inCat(s.cat)&&inHid(s.hidden)&&hit(s.name,s.note,s.finish,s.origin));
+  const vis=all.filter(({s})=>inCat(s.cat)&&inHid(s.hidden)&&inLocF(s.loc)&&hit(s.name,s.note,s.finish,s.origin));
   const nPhotos=s=>uniqPhotos([{img:s.img},...(s.gallery||[]).map(g=>({img:g}))]).length;
   $("#view").innerHTML=head("Stock","Slabs on the ground in Dubai. Arrived cargo blocks are shown with the stock on the site but are edited under Cargo.",`<button class="btn" id="xls">Download Excel</button><button class="btn amber" data-act="newStock">+ New item</button>`)+
-    searchBar("Search material, finish or note",all.map(x=>x.s),s=>s.cat,s=>s.hidden)+
-    `<div class="tblwrap"><table><thead><tr><th></th><th>Material</th><th>Category</th><th>Finish</th><th class="r">m²</th><th class="r">Slabs</th><th>Slab size</th><th>Flags</th></tr></thead><tbody>
-    ${vis.length?vis.map(({s,i})=>`<tr class="row${s.hidden?" off":""}" data-es="${i}"><td>${thumb(s.img,s.name)}</td><td><div class="name">${esc(s.name)}</div><div class="sub">${esc(s.note)}</div></td><td>${esc(s.cat)}</td><td>${esc(s.finish||"")}</td><td class="r num">${fmt(s.m2)}</td><td class="r num">${s.pcs}</td><td class="mono">${esc(s.size)}</td><td>${s.hidden?offPill+" ":""}${s.hot?`<span class="pill acc">★ Hot</span> `:""}${s.special?`<span class="pill warn">Special${s.price?" · AED "+esc(s.price):""}</span> `:""}${s.grp===1?`<span class="pill">Top of list</span> `:s.grp===2?`<span class="pill">Mid list</span> `:""}${nPhotos(s)>1?`<span class="pill">${nPhotos(s)} photos</span>`:""}</td></tr>`).join(""):`<tr><td colspan="8"><div class="empty">No stock items match.</div></td></tr>`}
+    searchBar("Search material, finish or note",all.map(x=>x.s),s=>s.cat,s=>s.hidden)+locChips(all.map(x=>x.s))+
+    `<div class="tblwrap"><table><thead><tr><th></th><th>Material</th><th>Category</th><th>Finish</th><th class="r">m²</th><th class="r">Slabs</th><th>Slab size</th><th>Held at</th><th>Flags</th></tr></thead><tbody>
+    ${vis.length?vis.map(({s,i})=>`<tr class="row${s.hidden?" off":""}" data-es="${i}"><td>${thumb(s.img,s.name)}</td><td><div class="name">${esc(s.name)}</div><div class="sub">${esc(s.note)}</div></td><td>${esc(s.cat)}</td><td>${esc(s.finish||"")}</td><td class="r num">${fmt(s.m2)}</td><td class="r num">${s.pcs}</td><td class="mono">${esc(s.size)}</td><td><span class="pill ${isFactory(s.loc)?"warn":"ok"}">${isFactory(s.loc)?"Factory":"Showroom"}</span></td><td>${s.hidden?offPill+" ":""}${s.hot?`<span class="pill acc">★ Hot</span> `:""}${s.special?`<span class="pill warn">Special${s.price?" · AED "+esc(s.price):""}</span> `:""}${s.grp===1?`<span class="pill">Top of list</span> `:s.grp===2?`<span class="pill">Mid list</span> `:""}${nPhotos(s)>1?`<span class="pill">${nPhotos(s)} photos</span>`:""}</td></tr>`).join(""):`<tr><td colspan="9"><div class="empty">No stock items match.</div></td></tr>`}
     </tbody></table></div>`;
   wireBar(); wireActs(); $("#xls").onclick=downloadExcel;
   document.querySelectorAll("[data-es]").forEach(r=>r.onclick=()=>editStock(+r.dataset.es));
+  document.querySelectorAll("[data-lf]").forEach(b=>b.onclick=()=>{ locF=b.dataset.lf; render(); });
 }
 
 /* ---------------- order catalogue ---------------- */
@@ -661,7 +676,7 @@ function downloadExcel(){
   // Dubai stock
   const S=d.STOCK.slice().sort((a,b)=>(a.grp||3)-(b.grp||3));
   const stockRows=[H(["Material","Category","Finish","Origin","Location","Quantity (m²)","Slabs (pcs)","Slab size","Avg slab (m²)","Special price (AED/m²)","Special price","Hot","Position in list","Status","Photos","Description"])]
-    .concat(S.map(s=>[s.name,s.cat,s.finish||"",s.origin||"",s.loc||"",num2(s.m2),int(s.pcs),s.size||"",s.pcs?num2(s.m2/s.pcs):"",s.price?(isNaN(+s.price)?s.price:int(s.price)):"",yes(s.special),yes(s.hot),s.grp||3,status(s),uniqPhotos([{img:s.img},...(s.gallery||[]).map(g=>({img:g}))]).length,s.note||""]));
+    .concat(S.map(s=>[s.name,s.cat,s.finish||"",s.origin||"",locName(s.loc),num2(s.m2),int(s.pcs),s.size||"",s.pcs?num2(s.m2/s.pcs):"",s.price?(isNaN(+s.price)?s.price:int(s.price)):"",yes(s.special),yes(s.hot),s.grp||3,status(s),uniqPhotos([{img:s.img},...(s.gallery||[]).map(g=>({img:g}))]).length,s.note||""]));
   // cargo bundles
   const bundleRows=[H(["Block","Title","Bundle","Material","Category","Status","Slabs (pcs)","Quantity (m²)","Net sizes (cm × cm × pcs)","Size on the card","Photo","Book-match","Hot"])];
   d.DATA.forEach(B=>(B.lots||[]).forEach(l=>bundleRows.push([B.block,B.title||"",l.id,B.material||"",B.cat||"",
@@ -677,7 +692,7 @@ function downloadExcel(){
   const summary=[[{v:"GM Stone travertine & marble stock",s:4}],["Downloaded",when.toLocaleString("en-GB",{dateStyle:"medium",timeStyle:"short"})],
     ["Last saved in the admin",state.updatedAt?new Date(state.updatedAt).toLocaleString("en-GB",{dateStyle:"medium",timeStyle:"short"}):"—"],[],
     [{v:"On the website",s:1},{v:"Items",s:1},{v:"m²",s:1},{v:"Slabs",s:1}],
-    ["Stock in Dubai",st.length,{v:r2(sum(st,s=>s.m2)),s:2},{v:sum(st,s=>s.pcs),s:3}],
+    ...[["Dubai","Stock — Dubai showroom"],["Sharjah","Stock — Sharjah factory"]].map(([l,t])=>{ const a=st.filter(s=>isFactory(s.loc)===isFactory(l)); return [t,a.length,{v:r2(sum(a,s=>s.m2)),s:2},{v:sum(a,s=>s.pcs),s:3}]; }),
     ["Arrived bundles (in stock)",arrivedBundles,{v:r2(sum(arrived,b=>lotTotSite(b).m2)),s:2},{v:sum(arrived,b=>lotTotSite(b).pcs),s:3}],
     [{v:"In stock, total",s:4},{v:st.length+arrivedBundles,s:6},{v:r2(sum(st,s=>s.m2)+sum(arrived,b=>lotTotSite(b).m2)),s:5},{v:sum(st,s=>s.pcs)+sum(arrived,b=>lotTotSite(b).pcs),s:6}],
     ["Arriving bundles ("+arriving.length+" blocks)",arrivingBundles,{v:r2(sum(arriving,b=>lotTotSite(b).m2)),s:2},{v:sum(arriving,b=>lotTotSite(b).pcs),s:3}],
@@ -799,6 +814,66 @@ function wireList(){
     redraw(id); }));
 }
 
+/* ---- where stock is held: the site knows exactly two places ----
+   loc "Sharjah" shows "Sharjah factory" on the card; anything else shows "Dubai showroom".
+   The site's "Where it is held" filter matches "Dubai" and "Sharjah". */
+const LOCS=[["Dubai","Dubai showroom"],["Sharjah","Sharjah factory"]];
+const isFactory=l=>l==="Sharjah";
+const locName=l=>isFactory(l)?"Sharjah factory":"Dubai showroom";
+const locSelect=(id,val)=>`<div class="field"><label for="f_${id}">Where it is held</label><select id="f_${id}">${LOCS.map(([v,t])=>`<option value="${v}"${(isFactory(val)?"Sharjah":"Dubai")===v?" selected":""}>${t}</option>`).join("")}</select><span class="hint">Shown on the card on the site, and used by its “Where it is held” filter.</span></div>`;
+const range=a=>{ const lo=Math.min(...a), hi=Math.max(...a); return lo===hi?String(lo):lo+"–"+hi; };
+
+/* ---- move cargo into stock (Dubai showroom or Sharjah factory) ----
+   The chosen bundles leave Cargo and become (or are added to) a stock item with that location. */
+function moveBlock(i){
+  const ST=state.data.STOCK, B=state.data.DATA[i]; if(!B) return; const lots=B.lots||[];
+  const bName=B.title||"Block "+B.block, parts=(B.material||"").split("·").map(s=>s.trim());
+  const name0=(B.title||parts[0]||"").toUpperCase(), finish0=parts.slice(1).join(" · ");
+  openDrawer("Move to stock",bName+" · "+(B.material||""),
+    `<p class="hint" style="margin:0">The bundles you tick leave Cargo and show in the stock section of the site, labelled with where they are held. Bundle numbers go into the description, so visitors can still search for them. Undo from History if needed.</p>
+     <div class="field"><label>Where it went</label><div class="seg" id="mvLoc">${LOCS.map(([v,t],k)=>`<label><input type="radio" name="mvloc" value="${v}"${k===0?" checked":""}> ${t}</label>`).join("")}</div></div>
+     <div class="field"><label>Bundles</label><div class="mvlots">${lots.map((l,j)=>`<label class="check"><input type="checkbox" data-mvl="${j}"${l.hidden?"":" checked"}> <span class="mono">${esc(l.id)}</span> · ${l.pcs} slabs · ${fmt(l.m2)} m²${l.img?"":" · no photo"}${l.hidden?` <span class="pill bad">Hidden</span>`:""}</label>`).join("")}</div></div>
+     <div class="field"><label for="f_into">Put into</label><select id="f_into"></select></div>
+     <div id="mvNew"><div class="grid2">${F("mvname","Name on the site",name0)}${F("mvfinish","Finish",finish0)}</div>${F("mvcat","Category",B.cat||"Travertine",{select:CATS})}</div>
+     <div class="notice" id="mvSum"></div>`,
+    `<span class="sp"></span><button class="btn ghost" id="cancel">Cancel</button><button class="btn solid" id="mvGo">Move to stock</button>`);
+  $("#cancel").onclick=closeDrawer;
+  const loc=()=>document.querySelector('input[name="mvloc"]:checked').value;
+  const chosen=()=>[...document.querySelectorAll("[data-mvl]")].filter(c=>c.checked).map(c=>lots[+c.dataset.mvl]);
+  const fillInto=()=>{ const cur=$("#f_into").value, l=loc();
+    const opts=ST.map((s,k)=>({s,k})).filter(({s})=>isFactory(s.loc)===isFactory(l)).sort((a,b)=>((a.s.cat===B.cat)?0:1)-((b.s.cat===B.cat)?0:1)||a.s.name.localeCompare(b.s.name));
+    $("#f_into").innerHTML=`<option value="new">A new stock item</option>`+opts.map(({s,k})=>`<option value="${k}">Add to ${esc(s.name)}${s.finish?" · "+esc(s.finish):""} (${fmt(s.m2)} m² now)${s.hidden?" · hidden":""}</option>`).join("");
+    if([...$("#f_into").options].some(o=>o.value===cur)) $("#f_into").value=cur; };
+  const summary=()=>{ const L=chosen(), net=L.flatMap(l=>l.net||[]), m2=L.reduce((a,l)=>a+(+l.m2||0),0), pcs=L.reduce((a,l)=>a+(+l.pcs||0),0), ph=L.filter(l=>l.img).length;
+    $("#mvNew").hidden=$("#f_into").value!=="new";
+    const where=locName(loc()), into=$("#f_into").value==="new"?"a new stock item":ST[+$("#f_into").value].name;
+    $("#mvSum").innerHTML=L.length?`<p><b>${L.length} bundle${L.length===1?"":"s"} · ${pcs} slabs · ${fmt(m2)} m²</b> → ${esc(into)}, ${esc(where)}.${net.length?` Slab sizes ${range(net.map(n=>n[1]))} × ${range(net.map(n=>n[0]))} cm.`:""} ${ph} photo${ph===1?"":"s"}.${!ph&&$("#f_into").value==="new"?" <br>With no photo it is saved <b>hidden from the site</b>; add a photo, then put it back on site.":""}${L.length===lots.length?" The block leaves Cargo.":""}</p>`:`<p>Tick at least one bundle.</p>`; };
+  document.querySelectorAll('input[name="mvloc"]').forEach(r=>r.onchange=()=>{ fillInto(); summary(); });
+  document.querySelectorAll("[data-mvl]").forEach(c=>c.onchange=summary); $("#f_into").onchange=summary;
+  fillInto(); summary();
+  $("#mvGo").onclick=()=>busy("mvGo",async()=>{
+    const L=chosen(); if(!L.length){ toast("Tick at least one bundle",true); return; }
+    const l=loc(), net=L.flatMap(x=>x.net||[]), m2=Math.round(L.reduce((a,x)=>a+(+x.m2||0),0)*100)/100, pcs=L.reduce((a,x)=>a+(+x.pcs||0),0), ids=L.map(x=>x.id);
+    const photos=uniqPhotos(L.filter(x=>x.img).map(x=>({img:x.img,fb:x.fb||""})));
+    const from=`${ids.length===1?"Bundle":"Bundles"} ${ids.join(", ")} from block ${B.block}`+(B.seq?" — cut in sequence, can be book-matched":"")+".";
+    const into=$("#f_into").value; let what;
+    if(into==="new"){
+      const name=V("mvname"); if(!name){ toast("Give the stock item a name",true); return; }
+      const r={name,m2,pcs,size:net.length?`${range(net.map(n=>n[1]))} × ${range(net.map(n=>n[0]))} cm`:"",note:from,img:photos[0]?photos[0].img:"",origin:null,finish:V("mvfinish")||null,
+        gallery:photos.length>1?photos.map(p=>p.img):null,cat:V("mvcat"),key:nextKey(ST,"s"),grp:3,loc:l,special:false};
+      if(photos[0]&&photos[0].fb) r.fb=photos[0].fb; if(B.hot) r.hot=true; if(!photos.length) r.hidden=true;
+      ST.push(r); what=`Moved ${ids.length} bundle${ids.length===1?"":"s"} of ${bName} to ${locName(l)}: new stock item ${name}${r.hidden?" (hidden until it has a photo)":""}`;
+    }else{
+      const S=ST[+into], list=uniqPhotos([{img:S.img,fb:S.fb},...(S.gallery||[]).map(g=>({img:g})),...photos]);
+      S.m2=Math.round(((+S.m2||0)+m2)*100)/100; S.pcs=(+S.pcs||0)+pcs; S.note=((S.note||"")+" + "+from).trim().replace(/^\+ /,"");
+      if(list.length){ S.img=list[0].img; if(list[0].fb) S.fb=list[0].fb; S.gallery=list.length>1?list.map(p=>p.img):null; }
+      what=`Moved ${ids.length} bundle${ids.length===1?"":"s"} of ${bName} to ${locName(l)}: added to ${S.name}`;
+    }
+    const keep=lots.filter(x=>!L.includes(x)); if(keep.length) B.lots=keep; else state.data.DATA.splice(i,1);
+    if(await commit(what)) closeDrawer();
+  });
+}
+
 /* ---- block ---- */
 function editBlock(i){
   const D=state.data.DATA, isNew=i<0;
@@ -850,7 +925,7 @@ function editStock(i){
      <div class="grid2">${F("cat","Category",S.cat,{select:CATS})}${F("finish","Finish",S.finish||"",{ph:"Polished · bookmatched"})}</div>
      <div class="grid3">${F("m2","m² available",S.m2,{type:"number",step:"0.01"})}${F("pcs","Slabs",S.pcs,{type:"number"})}${F("size","Slab size",S.size||"",{ph:"302 × 200 cm"})}</div>
      ${F("note","Description",S.note||"",{area:true})}
-     <div class="grid2">${F("origin","Origin",S.origin||"",{ph:"Italy"})}${F("loc","Location",S.loc||"Dubai")}</div>
+     <div class="grid2">${F("origin","Origin",S.origin||"",{ph:"Italy"})}${locSelect("loc",S.loc)}</div>
      <div class="grid2">${F("grp","Position in list",["1","2","3"].includes(String(S.grp))?String(S.grp):"3",{select:["1","2","3"],hint:"1 shows first, 3 last within its category."})}${F("price","Special price · AED per m² (optional)",S.price||"",{cls:"mono"})}</div>
      <div class="checks">${C("special","Special price",S.special)}${C("hot","★ Hot · featured",S.hot)}</div>
      ${photoList("st",photos,{label:"Photos",main:"Card photo",hint:"The first photo is on the card. Clicking it on the site shows all of them in this order."})}`,
