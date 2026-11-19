@@ -1329,7 +1329,7 @@ body{overflow-x:hidden}
   </div>
   <div class="specwrap" id="specwrap">
     <h3>Special price</h3>
-    <p>Five materials reduced while these lots last. Prices are per square metre, for the slabs
+    <p><span id="spCount">Five materials reduced while these lots last</span>. Prices are per square metre, for the slabs
        standing in Dubai today — open a card, tell us the area, and we will confirm the slab count.</p>
     <div class="sgrid" id="spgrid"></div>
   </div>
@@ -1350,7 +1350,7 @@ body{overflow-x:hidden}
     </div>
     <div class="classwrap">
       <h3>Classic collection</h3>
-      <p>The four we can always get, in any quantity, whether or not they are standing in the yard
+      <p>The <span id="clCount">five</span> we can always get, in any quantity, whether or not they are standing in the yard
          today. Tell us the area and the finish and we will come back with a price and a date.</p>
       <div class="sgrid" id="cgrid"></div>
     </div>
@@ -1545,6 +1545,8 @@ const sel=new Set();          // arriving bundles, by id
 const selS=new Map();         // stock materials: name -> {m2, slabs}
 const fmt=n=>n.toLocaleString("en",{minimumFractionDigits:2,maximumFractionDigits:2});
 const sizeLine=s=>`${s[0]} × ${s[1]} <span>cm × ${s[2]} pcs</span>`;
+/* 5 -> "five" (or "Five"); numbers above twelve stay as digits */
+const numWord=(n,cap)=>{ const w=["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve"][n]||String(n); return cap?w.charAt(0).toUpperCase()+w.slice(1):w; };
 const avgSlab=S=>(S.m2!=null&&S.pcs)?S.m2/S.pcs:null;
 const bTot=B=>({pcs:B.lots.reduce((a,l)=>a+l.pcs,0), m2:B.lots.reduce((a,l)=>a+l.m2,0)});
 const arrivedBlocks=()=>DATA.filter(B=>B.arrived);
@@ -1658,6 +1660,9 @@ function renderStock(){
     all.filter(S=>S.special).forEach(S=>stockCard(S,sp));
     const w=document.getElementById("specwrap");
     if(w) w.style.display=sp.children.length?"":"none";
+    /* the sentence above the cards counts them, so it always matches what is shown */
+    const sc=document.getElementById("spCount"), n=sp.children.length;
+    if(sc&&n) sc.textContent=n===1?"One material reduced while this lot lasts":numWord(n,true)+" materials reduced while these lots last";
   }
   const list=all.filter(S=>!S.special);
 
@@ -1900,6 +1905,7 @@ function renderOrder(){
     ORDER.filter(O=>O.classic&&visO(O)).forEach(O=>cg.appendChild(orderCard(O)));
     const wrap=cg.closest(".classwrap");
     if(wrap) wrap.style.display=cg.children.length?"":"none";
+    const cc=document.getElementById("clCount"); if(cc&&cg.children.length) cc.textContent=numWord(cg.children.length);
   }
   const list=ORDER.filter(O=>!O.classic&&visO(O));
   list.forEach(O=>g.appendChild(orderCard(O)));
