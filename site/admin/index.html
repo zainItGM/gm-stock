@@ -177,6 +177,8 @@ td .sub{color:var(--muted);font-size:12.5px;max-width:42ch;overflow:hidden;text-
 .confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:var(--bad);font-size:13px}
 .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;font-family:var(--m);font-size:12px;letter-spacing:.04em;z-index:40;max-width:calc(100% - 32px);box-shadow:0 8px 30px rgba(0,0,0,.3)}
 .toast.bad{background:var(--bad);color:#fff}
+.badimg{display:flex;align-items:center;justify-content:center;text-align:center;width:100%;height:100%;min-height:40px;border:1px dashed var(--bad);color:var(--bad);background:var(--bad-soft);font-family:var(--m);font-size:9px;letter-spacing:.05em;text-transform:uppercase;line-height:1.2}
+.thumb.badimg{width:52px;height:40px;min-height:0}
 .toast button{margin-left:12px;padding:3px 10px;border:1px solid currentColor;color:inherit;font-family:var(--d);font-weight:600;font-size:14px;letter-spacing:.06em;text-transform:uppercase}
 
 /* hidden from the site */
@@ -293,13 +295,13 @@ async function api(path,opt={}){
 function signOut(expired){ token=""; try{ localStorage.removeItem(TOKEN_KEY); }catch(e){} $("#app").hidden=true; $("#login").hidden=false; $("#loginErr").textContent=expired?"Your session has ended. Sign in again.":""; $("#pw").value=""; $("#pw").focus(); }
 
 /* ============================ state ============================ */
-const state={data:null,rev:0,updatedAt:null,saving:false};
+const state={data:null,saved:null,rev:0,updatedAt:null,saving:false}; // saved: a copy of what the server holds
 const EMPTY=()=>({DATA:[],STOCK:[],ORDER:[],PROJECTS:[],ENQ_TO:"info@gmstone.ae",WA_NO:"97145768792"});
 
 async function loadData(){
   setSync("busy","Loading…");
   const doc=await api("data");
-  state.rev=doc.rev||0; state.updatedAt=doc.updatedAt||null; state.data=doc.data||null;
+  state.rev=doc.rev||0; state.updatedAt=doc.updatedAt||null; state.data=doc.data||null; state.saved=state.data?clone(state.data):null;
   setSync(state.data?"ok":"busy",state.data?"Live · rev "+state.rev:"Not set up yet");
   render();
 }
@@ -309,14 +311,17 @@ async function commit(what){
   state.saving=true; setSync("busy","Saving…");
   try{
     const r=await api("data",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({rev:state.rev,data:state.data,what:what||"Saved"})});
-    state.rev=r.rev; state.updatedAt=r.updatedAt; setSync("ok","Live · rev "+state.rev); state.history=null;
+    state.rev=r.rev; state.updatedAt=r.updatedAt; state.saved=clone(state.data); setSync("ok","Live · rev "+state.rev); state.history=null;
     const before=r.rev-1;
     toast((what||"Saved")+" — live",false,before>=1?{label:"Undo",fn:()=>restore(before,"Undone")}:null); render(); return true;
   }catch(e){
     setSync("bad","Not saved");
-    if(e.status===409){ toast(e.error,true); await loadData(); }
-    else toast("Could not save: "+(e.error||e.status),true);
-    return false;
+    // the edit was applied to the screen before saving; undo that, so the screen shows what is really saved
+    // (the edit panel stays open with its values, so pressing Save again simply retries)
+    if(state.saved) state.data=clone(state.saved);
+    if(e.status===409){ toast(e.error,true); await loadData().catch(()=>{}); }
+    else toast(e.status===0?"Not saved: no connection. Check the internet and press Save again.":"Not saved: "+(e.error||e.status),true);
+    render(); return false;
   }finally{ state.saving=false; }
 }
 /* Put an earlier saved version back on the site (it becomes a new save, so it can be undone too). */
@@ -326,7 +331,7 @@ async function restore(rev,msg){
   try{
     const r=await api("restore",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({rev,baseRev:state.rev})});
     const before=r.rev-1;
-    state.data=r.data; state.rev=r.rev; state.updatedAt=r.updatedAt; state.history=null; setSync("ok","Live · rev "+state.rev);
+    state.data=r.data; state.saved=clone(r.data); state.rev=r.rev; state.updatedAt=r.updatedAt; state.history=null; setSync("ok","Live · rev "+state.rev);
     closeDrawer(); toast((msg||"Version put back")+" — live",false,{label:"Undo",fn:()=>restore(before,"Undone")}); render(); return true;
   }catch(e){
     setSync("bad","Not saved");
@@ -400,7 +405,36 @@ const inLocF=l=>locF==="All"||(locF==="Sharjah")===isFactory(l);
 const locChips=items=>{ const nf=items.filter(s=>isFactory(s.loc)).length; return `<div class="bar"><span class="lab">Held at</span><div class="chips">${[["All","Both",items.length],["Dubai","Dubai showroom",items.length-nf],["Sharjah","Sharjah factory",nf]].map(([v,t,n])=>`<button class="chip${locF===v?" on":""}" data-lf="${v}">${t}<small>${n}</small></button>`).join("")}</div></div>`; };
 const hit=(...f)=>!q||f.join(" ").toLowerCase().includes(q);
 const inCat=c=>cat==="All"||c===cat;
-function thumb(src,alt){ return src?`<img class="thumb" src="${esc(src)}" alt="${esc(alt||"")}" loading="lazy" referrerpolicy="no-referrer">`:`<span class="thumb none">no photo</span>`; }
+/* a photo that doesn't load: try the Drive thumbnail the site also falls back to, then say so */
+function imgFail(el){ if(el.dataset.fb){ const f=el.dataset.fb; el.removeAttribute("data-fb"); el.src=f; return; }
+  const s=document.createElement("span"); s.className=(el.className||"")+" badimg"; s.textContent="link not working"; s.title="This photo doesn't load: "+(el.getAttribute("src")||""); el.replaceWith(s); }
+const fbAttr=fb=>fb?` data-fb="${esc(fb)}"`:"";
+const IMG=(src,fb,cls,alt)=>`<img${cls?` class="${cls}"`:""} src="${esc(src)}"${fbAttr(fb)} alt="${esc(alt||"")}" loading="lazy" referrerpolicy="no-referrer" onerror="imgFail(this)">`;
+function thumb(src,alt,fb){ return src?IMG(src,fb,"thumb",alt):`<span class="thumb none">no photo</span>`; }
+/* ---- check that every photo link loads (Drive files must be shared publicly) ---- */
+function photoUses(){ const d=state.data, m=new Map(); const add=(u,fb,label,hidden)=>{ if(!u) return; if(!m.has(u)) m.set(u,{u,fb:fb||"",items:new Set(),hidden:true}); const x=m.get(u); x.items.add(label); if(fb&&!x.fb) x.fb=fb; if(!hidden) x.hidden=false; };
+  d.STOCK.forEach(s=>{ add(s.img,s.fb,"Stock · "+s.name,s.hidden); (s.gallery||[]).forEach(g=>add(g,"","Stock · "+s.name,s.hidden)); });
+  d.DATA.forEach(B=>(B.lots||[]).forEach(l=>add(l.img,l.fb,"Cargo · bundle "+l.id,B.hidden||l.hidden)));
+  d.ORDER.forEach(o=>{ add(o.img,o.fb,"To order · "+o.name,o.hidden); (o.shots||[]).forEach(s=>add(s.img,s.fb,"To order · "+o.name,o.hidden)); });
+  d.PROJECTS.forEach(p=>(p.shots||[]).forEach(s=>add(s.img,s.fb,"Project · "+p.name,p.hidden)));
+  return [...m.values()]; }
+function photoCheckHtml(){ const c=state.photoCheck;
+  if(!c) return `<p>Checks all ${photoUses().length} photo links. Takes about a minute.</p><div><button class="btn" id="pcGo">Check all photo links</button></div>`;
+  if(c.running) return `<p class="prog">Checking photo ${c.done} of ${c.total}…</p>`;
+  if(!c.bad.length) return `<p><b>All ${c.total} photo links load.</b> Checked ${esc(c.when)}.</p><div><button class="btn ghost" id="pcGo">Check again</button></div>`;
+  return `<p><b>${c.bad.length} of ${c.total} photo links don't load</b> (checked ${esc(c.when)}). For a Google Drive photo, open it in Drive and share it as “anyone with the link can view”; otherwise replace the photo in the item.</p>
+    <ul class="diff">${c.bad.map(x=>`<li>${[...x.items].map(esc).join(", ")}${x.hidden?" <span class=\"pill\">hidden</span>":""} — <a href="${esc(x.u)}" target="_blank" rel="noopener noreferrer">open the link</a></li>`).join("")}</ul>
+    <div><button class="btn ghost" id="pcGo">Check again</button></div>`; }
+function wirePhotoCheck(){ const b=$("#pcGo"); if(b) b.onclick=checkPhotos; }
+async function checkPhotos(){
+  const list=photoUses(), c=state.photoCheck={running:true,done:0,total:list.length,bad:[]}; const show=()=>{ const el=$("#photoCheck"); if(el){ el.innerHTML=photoCheckHtml(); wirePhotoCheck(); } }; show();
+  const load=src=>new Promise(res=>{ const im=new Image(); im.referrerPolicy="no-referrer"; const t=setTimeout(()=>{ im.onload=im.onerror=null; res(false); },20000);
+    im.onload=()=>{ clearTimeout(t); res(im.naturalWidth>0); }; im.onerror=()=>{ clearTimeout(t); res(false); }; im.src=src; });
+  const queue=list.slice();
+  const worker=async()=>{ while(queue.length){ const x=queue.shift(); let good=await load(x.u); if(!good&&x.fb) good=await load(x.fb); if(!good) c.bad.push(x); c.done++; if(c.done%5===0||!queue.length) show(); } };
+  await Promise.all(Array.from({length:6},worker));
+  c.running=false; c.when=new Date().toLocaleString("en-GB",{dateStyle:"medium",timeStyle:"short"}); show();
+}
 function wireActs(){ document.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>({newBlock:()=>editBlock(-1),newStock:()=>editStock(-1),newOrder:()=>editOrder(-1),newProject:()=>editProject(-1)})[b.dataset.act]()); }
 
 /* ---------------- what is on the site (hidden items are left out of it) ---------------- */
@@ -457,7 +491,9 @@ function rOverview(){
       <p>Every save is kept. Made a mistake? <a href="#history">History</a> puts any earlier version back.</p>
       <p>Website photos linked from Google Drive must be shared as “anyone with the link can view”.</p>
     </div></div>
-  </div>`;
+  </div>
+  <div class="sec"><h2>Photo links <span>loads every photo the way a visitor's browser does</span></h2><div class="panel" id="photoCheck">${photoCheckHtml()}</div></div>`;
+  wirePhotoCheck();
   wireActs(); $("#xls").onclick=downloadExcel;
 }
 
@@ -480,10 +516,10 @@ function rCargo(){
 function blockCard(B,i,tag){
   const t=B.hidden?lotTot(B):lotTotSite(B), lots=B.lots||[], nh=B.hidden?0:lots.filter(l=>l.hidden).length; // a hidden block shows its real size
   return `<div class="block${B.hidden?" off":""}"><div class="bh"><h3>${esc(B.title||"Block "+B.block)}</h3><span class="meta">${esc(B.material)} · ${esc(B.cat)}</span>
-    ${B.hidden?offPill:`<span class="pill ${tag}">${B.arrived?"Arrived":"Arriving"}</span>`}${B.new?`<span class="pill acc">New</span>`:""}${B.hot?`<span class="pill acc">★ Hot</span>`:""}${B.seq?`<span class="pill">Book-match</span>`:""}
+    ${B.hidden?offPill:`<span class="pill ${tag}">${B.arrived?"Arrived":"Arriving"}</span>`}${B.hot?`<span class="pill acc">★ Hot</span>`:""}${B.seq?`<span class="pill">Book-match</span>`:""}
     <span class="meta num">${fmt(t.m2)} m² · ${t.pcs} slabs · ${lots.length-nh} bundle${lots.length-nh===1?"":"s"}${nh?` · ${nh} hidden`:""}</span>
     <span class="sp"><button class="btn sm ghost" data-hb="${i}">${B.hidden?"Put back on site":"Hide block"}</button><button class="btn sm amber" data-mv="${i}">Move to stock…</button><button class="btn sm" data-eb="${i}">Edit block</button></span></div>
-    <div class="lots">${lots.map((l,j)=>`<button class="lot${l.hidden?" off":""}" data-eb2="${i}" data-el="${j}">${thumb(l.img,"Bundle "+l.id)}<span><span class="id">Bundle ${esc(l.id)}</span>${l.hidden?` <span class="pill bad">Hidden</span>`:""}<br><span class="sz">${(l.net||[]).map(n=>`${n[0]} × ${n[1]} cm × ${n[2]}`).join(" · ")||"no sizes"}</span><div class="ar num">${fmt(l.m2)} <small>m² · ${l.pcs} slabs</small></div></span></button>`).join("")}<button class="addlot" data-al="${i}">+ Add bundle</button></div></div>`;
+    <div class="lots">${lots.map((l,j)=>`<button class="lot${l.hidden?" off":""}" data-eb2="${i}" data-el="${j}">${thumb(l.img,"Bundle "+l.id,l.fb)}<span><span class="id">Bundle ${esc(l.id)}</span>${l.hidden?` <span class="pill bad">Hidden</span>`:""}<br><span class="sz">${(l.net||[]).map(n=>`${n[0]} × ${n[1]} cm × ${n[2]}`).join(" · ")||"no sizes"}</span><div class="ar num">${fmt(l.m2)} <small>m² · ${l.pcs} slabs</small></div></span></button>`).join("")}<button class="addlot" data-al="${i}">+ Add bundle</button></div></div>`;
 }
 
 /* ---------------- stock ---------------- */
@@ -494,7 +530,7 @@ function rStock(){
   $("#view").innerHTML=head("Stock","Slabs on the ground in Dubai. Arrived cargo blocks are shown with the stock on the site but are edited under Cargo.",`<button class="btn" id="xls">Download Excel</button><button class="btn amber" data-act="newStock">+ New item</button>`)+
     searchBar("Search material, finish or note",all.map(x=>x.s),s=>s.cat,s=>s.hidden)+locChips(all.map(x=>x.s))+
     `<div class="tblwrap"><table><thead><tr><th></th><th>Material</th><th>Category</th><th>Finish</th><th class="r">m²</th><th class="r">Slabs</th><th>Slab size</th><th>Held at</th><th>Flags</th></tr></thead><tbody>
-    ${vis.length?vis.map(({s,i})=>`<tr class="row${s.hidden?" off":""}" data-es="${i}"><td>${thumb(s.img,s.name)}</td><td><div class="name">${esc(s.name)}</div><div class="sub">${esc(s.note)}</div></td><td>${esc(s.cat)}</td><td>${esc(s.finish||"")}</td><td class="r num">${s.m2==null?`<span class="sub">on request</span>`:fmt(s.m2)}</td><td class="r num">${s.pcs==null?"—":s.pcs}</td><td class="mono">${esc(s.size)}</td><td><span class="pill ${isFactory(s.loc)?"warn":"ok"}">${isFactory(s.loc)?"Factory":"Showroom"}</span></td><td>${s.hidden?offPill+" ":""}${s.hot?`<span class="pill acc">★ Hot</span> `:""}${s.special?`<span class="pill warn">Special${s.price?" · AED "+esc(s.price):""}</span> `:""}${s.grp===1?`<span class="pill">Top of list</span> `:s.grp===2?`<span class="pill">Mid list</span> `:""}${nPhotos(s)>1?`<span class="pill">${nPhotos(s)} photos</span>`:""}</td></tr>`).join(""):`<tr><td colspan="9"><div class="empty">No stock items match.</div></td></tr>`}
+    ${vis.length?vis.map(({s,i})=>`<tr class="row${s.hidden?" off":""}" data-es="${i}"><td>${thumb(s.img,s.name,s.fb)}</td><td><div class="name">${esc(s.name)}</div><div class="sub">${esc(s.note)}</div></td><td>${esc(s.cat)}</td><td>${esc(s.finish||"")}</td><td class="r num">${s.m2==null?`<span class="sub">on request</span>`:fmt(s.m2)}</td><td class="r num">${s.pcs==null?"—":s.pcs}</td><td class="mono">${esc(s.size)}</td><td><span class="pill ${isFactory(s.loc)?"warn":"ok"}">${isFactory(s.loc)?"Factory":"Showroom"}</span></td><td>${s.hidden?offPill+" ":""}${s.hot?`<span class="pill acc">★ Hot</span> `:""}${s.special?`<span class="pill warn">Special${s.price?" · AED "+esc(s.price):""}</span> `:""}${s.grp===1?`<span class="pill">Top of list</span> `:s.grp===2?`<span class="pill">Mid list</span> `:""}${nPhotos(s)>1?`<span class="pill">${nPhotos(s)} photos</span>`:""}</td></tr>`).join(""):`<tr><td colspan="9"><div class="empty">No stock items match.</div></td></tr>`}
     </tbody></table></div>`;
   wireBar(); wireActs(); $("#xls").onclick=downloadExcel;
   document.querySelectorAll("[data-es]").forEach(r=>r.onclick=()=>editStock(+r.dataset.es));
@@ -505,7 +541,7 @@ function rStock(){
 function rOrder(){
   const all=state.data.ORDER.map((o,i)=>({o,i}));
   const vis=all.filter(({o})=>inCat(o.cat)&&inHid(o.hidden)&&hit(o.name,o.note,o.block,o.sel));
-  const card=({o,i})=>`<button class="pcard${o.hidden?" off":""}" data-eo="${i}"><div class="ph">${o.img?`<img src="${esc(o.img)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:"no photo"}</div><div class="bd"><b>${esc(o.name)}</b><span>${esc(o.cat)}${o.block?" · "+esc(o.block):""}</span><div class="pills">${o.hidden?offPill:""}${o.classic?`<span class="pill ok">Always available</span>`:""}${o.isnew?`<span class="pill acc">New</span>`:""}${o.sel?`<span class="pill">${esc(o.sel)}</span>`:""}${(o.shots||[]).length>1?`<span class="pill">${o.shots.length} photos</span>`:""}</div></div></button>`;
+  const card=({o,i})=>`<button class="pcard${o.hidden?" off":""}" data-eo="${i}"><div class="ph">${o.img?IMG(o.img,o.fb):"no photo"}</div><div class="bd"><b>${esc(o.name)}</b><span>${esc(o.cat)}${o.block?" · "+esc(o.block):""}</span><div class="pills">${o.hidden?offPill:""}${o.classic?`<span class="pill ok">Always available</span>`:""}${o.isnew?`<span class="pill acc">New</span>`:""}${o.sel?`<span class="pill">${esc(o.sel)}</span>`:""}${(o.shots||[]).length>1?`<span class="pill">${o.shots.length} photos</span>`:""}</div></div></button>`;
   $("#view").innerHTML=head("Brought in to order","Materials not held in Dubai but supplied on request, shown in the order catalogue.",`<button class="btn" id="xls">Download Excel</button><button class="btn amber" data-act="newOrder">+ New item</button>`)+
     searchBar("Search material or selection",all.map(x=>x.o),o=>o.cat,o=>o.hidden)+(vis.length?`<div class="cards">${vis.map(card).join("")}</div>`:`<div class="empty">No items match.</div>`);
   wireBar(); wireActs(); $("#xls").onclick=downloadExcel;
@@ -516,7 +552,7 @@ function rOrder(){
 function rProjects(){
   const all=state.data.PROJECTS.map((p,i)=>({p,i}));
   const vis=all.filter(({p})=>inHid(p.hidden)&&hit(p.name,p.loc,p.type,p.stone));
-  const card=({p,i})=>{ const s=(p.shots||[])[0]; return `<button class="pcard${p.hidden?" off":""}" data-ep="${i}"><div class="ph">${s&&s.img?`<img src="${esc(s.img)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:"no photo"}</div><div class="bd"><b>${esc(p.name)}</b><span>${esc(p.loc)}</span><span>${esc(p.type)}${p.scope?" · "+esc(p.scope):""}</span><div class="pills">${p.hidden?offPill:""}<span class="pill">${(p.shots||[]).length} photos</span>${p.reel?`<span class="pill acc">Reel</span>`:""}${state.pins&&state.pins.has(i)?`<span class="pill">Map pin</span>`:""}</div></div></button>`; };
+  const card=({p,i})=>{ const s=(p.shots||[])[0]; return `<button class="pcard${p.hidden?" off":""}" data-ep="${i}"><div class="ph">${s&&s.img?IMG(s.img,s.fb):"no photo"}</div><div class="bd"><b>${esc(p.name)}</b><span>${esc(p.loc)}</span><span>${esc(p.type)}${p.scope?" · "+esc(p.scope):""}</span><div class="pills">${p.hidden?offPill:""}<span class="pill">${(p.shots||[]).length} photos</span>${p.reel?`<span class="pill acc">Reel</span>`:""}${state.pins&&state.pins.has(i)?`<span class="pill">Map pin</span>`:""}</div></div></button>`; };
   const hasHidden=state.data.PROJECTS.some(p=>p.hidden);
   $("#view").innerHTML=head("Projects","Completed work on the Projects tab. Map pins on the site open projects by their place in this list, so projects with a pin keep their place and new projects go at the end.",`<button class="btn amber" data-act="newProject">+ New project</button>`)+
     `<div class="bar"><input type="search" id="q" placeholder="Search project, place or stone" value="${esc(q)}" aria-label="Search">${hasHidden?`<div class="chips"><button class="chip${onlyHidden?" on":""}" data-hid>Hidden from site<small>${state.data.PROJECTS.filter(p=>p.hidden).length}</small></button></div>`:""}</div>`+
@@ -778,20 +814,24 @@ function wireFoot(onSave,onDel,onHide){
   const d=$("#delBtn"); if(d){ if(!onDel) d.hidden=true; else { d.onclick=()=>{ $("#conf").hidden=false; d.hidden=true; }; $("#delYes").onclick=onDel; $("#delNo").onclick=()=>{ $("#conf").hidden=true; d.hidden=false; }; } }
 }
 const hideNote=x=>x.hidden?`<div class="notice"><p><b>Hidden from the site.</b> Visitors don't see this item. Its details and photos are kept here; press “Put back on site” to show it again.</p></div>`:"";
+/* A stock or to-order card without a photo shows an empty picture on the site, so such an item stays hidden
+   until it has one. (A project without photos would stop the site's Projects tab from working at all.) */
+const noPhotoHide=r=>{ if(!r.img&&!r.hidden){ r.hidden=true; return " — hidden from the site until it has a photo"; } return ""; };
+const needPhoto="Add a photo first: an item without a photo can't be shown on the site.";
 const withHidden=(r,h)=>{ const o={...r}; if(h) o.hidden=true; else delete o.hidden; return o; };
 
 /* single photo (cargo bundles): Drive link / ID or upload → {img, fb} */
 let photoState={};
 function photoField(id,img,fb,label){ photoState[id]={img:img||"",fb:fb||""}; return `<div class="field"><label>${esc(label||"Photo")}</label><div class="photo" id="ph_${id}">${photoInner(id)}</div></div>`; }
 function photoInner(id){ const p=photoState[id];
-  return `<div class="pv">${p.img?`<img src="${esc(p.img)}" alt="" referrerpolicy="no-referrer">`:"no photo"}</div><div class="pc"><input id="pl_${id}" placeholder="Paste a Google Drive link or file ID" aria-label="Google Drive link"><div class="row"><button class="btn sm" data-pl="${id}">Use link</button><button class="btn sm" data-pu="${id}">Upload photo</button>${p.img?`<button class="btn sm ghost" data-px="${id}">Remove</button>`:""}</div><span class="hint" id="pm_${id}">${p.img.startsWith("/api/img/")?"Uploaded photo":p.img.startsWith("data:")?"Embedded photo":p.img?"Linked":"Drive links must be shared with “anyone with the link”."}</span></div>`; }
+  return `<div class="pv">${p.img?IMG(p.img,p.fb):"no photo"}</div><div class="pc"><input id="pl_${id}" placeholder="Paste a Google Drive link or file ID" aria-label="Google Drive link"><div class="row"><button class="btn sm" data-pl="${id}">Use link</button><button class="btn sm" data-pu="${id}">Upload photo</button>${p.img?`<button class="btn sm ghost" data-px="${id}">Remove</button>`:""}</div><span class="hint" id="pm_${id}">${p.img.startsWith("/api/img/")?"Uploaded photo":p.img.startsWith("data:")?"Embedded photo":p.img?"Linked":"Drive links must be shared with “anyone with the link”."}</span></div>`; }
 function wirePhotos(){
   document.querySelectorAll("[data-pl]").forEach(b=>b.onclick=()=>{ const id=b.dataset.pl, p=linkPhoto($("#pl_"+id).value); if(!p) return; photoState[id]=p; $("#ph_"+id).innerHTML=photoInner(id); wirePhotos(); });
   document.querySelectorAll("[data-pu]").forEach(b=>b.onclick=()=>pickImages(false,async blobs=>{ const id=b.dataset.pu; $("#pm_"+id).textContent="Uploading…"; try{ photoState[id]={img:await uploadImage(blobs[0]),fb:""}; $("#ph_"+id).innerHTML=photoInner(id); wirePhotos(); }catch(e){ toast("Upload failed: "+(e.error||e.message),true); $("#pm_"+id).textContent=""; } }));
   document.querySelectorAll("[data-px]").forEach(b=>b.onclick=()=>{ photoState[b.dataset.px]={img:"",fb:""}; $("#ph_"+b.dataset.px).innerHTML=photoInner(b.dataset.px); wirePhotos(); });
 }
 function linkPhoto(v){ const d=driveId(v); if(d) return {img:driveImg(d),fb:driveFb(d)}; if(/^(https?:\/\/|\/)/.test((v||"").trim())) return {img:v.trim(),fb:""}; toast("Paste a Google Drive link, a file ID or an image URL",true); return null; }
-function pickImages(multi,cb){ const i=$("#fileIn"); i.multiple=!!multi; i.onchange=async e=>{ const fs=[...e.target.files]; e.target.value=""; if(!fs.length) return; try{ const out=[]; for(const f of fs) out.push(await compress(f)); cb(out); }catch(err){ toast("Could not read that image",true); } }; i.click(); }
+function pickImages(multi,cb){ const i=$("#fileIn"); i.multiple=!!multi; i.onchange=async e=>{ const fs=[...e.target.files]; e.target.value=""; if(!fs.length) return; try{ const out=[]; for(const f of fs) out.push(await compress(f)); cb(out); }catch(err){ toast("Couldn't read that photo. Use a JPEG or PNG; iPhone photos (HEIC) may need to be saved as JPEG first.",true); } }; i.click(); }
 /* resize to 1600px max and JPEG-encode so uploads stay small (≈ 150–400 KB) */
 function compress(file){ return new Promise((res,rej)=>{ const img=new Image(); const url=URL.createObjectURL(file); img.onload=()=>{ URL.revokeObjectURL(url); let max=1600,qlt=.86; const step=()=>{ const k=Math.min(1,max/Math.max(img.width,img.height)); const c=document.createElement("canvas"); c.width=Math.round(img.width*k); c.height=Math.round(img.height*k); c.getContext("2d").drawImage(img,0,0,c.width,c.height); c.toBlob(b=>{ if(b&&b.size>450000&&max>800){ max*=.8; qlt-=.06; step(); } else res(b); },"image/jpeg",qlt); }; step(); }; img.onerror=rej; img.src=url; }); }
 
@@ -801,7 +841,7 @@ const uniqPhotos=list=>{ const seen=new Set(); return list.filter(p=>p&&p.img&&!
 let listState={};
 function photoList(id,list,opt){ listState[id]={list:uniqPhotos(list).map(p=>({img:p.img,fb:p.fb||"",rot:p.rot||0})),opt}; return `<div class="field"><label>${esc(opt.label)}</label><span class="hint">${esc(opt.hint)}</span><div id="plw_${id}" class="plist">${listInner(id)}</div></div>`; }
 function listInner(id){ const {list,opt}=listState[id], n=list.length;
-  return `<div class="pgrid">${list.map((p,i)=>`<div class="pitem${i===0?" main":""}"><div class="pimg"><img src="${esc(p.img)}" alt="" referrerpolicy="no-referrer">${i===0?`<span class="pmain">${esc(opt.main)}</span>`:`<span class="pno">${i+1}</span>`}</div>
+  return `<div class="pgrid">${list.map((p,i)=>`<div class="pitem${i===0?" main":""}"><div class="pimg">${IMG(p.img,p.fb)}${i===0?`<span class="pmain">${esc(opt.main)}</span>`:`<span class="pno">${i+1}</span>`}</div>
       <div class="pbtns"><button type="button" class="btn sm ghost" data-pm="${id}:${i}:-1" ${i===0?"disabled":""} aria-label="Move earlier" title="Move earlier">◀</button><button type="button" class="btn sm ghost" data-pm="${id}:${i}:1" ${i===n-1?"disabled":""} aria-label="Move later" title="Move later">▶</button>${i>0?`<button type="button" class="btn sm" data-pk="${id}:${i}">Make main</button>`:""}<button type="button" class="btn sm ghost" data-pr="${id}:${i}" aria-label="Remove photo" title="Remove photo">✕</button></div></div>`).join("")||`<div class="empty" style="grid-column:1/-1">No photos yet.</div>`}</div>
     <div class="padd"><input id="pa_${id}" placeholder="Google Drive link or file ID" aria-label="Google Drive link"><button type="button" class="btn sm" data-pa="${id}">Add link</button><button type="button" class="btn sm" data-pu2="${id}">Upload photos</button><span class="prog" id="pp_${id}"></span></div>`; }
 function wireList(){
@@ -854,7 +894,8 @@ function moveBlock(i){
   document.querySelectorAll("[data-mvl]").forEach(c=>c.onchange=summary); $("#f_into").onchange=summary;
   fillInto(); summary();
   $("#mvGo").onclick=()=>busy("mvGo",async()=>{
-    const L=chosen(); if(!L.length){ toast("Tick at least one bundle",true); return; }
+    const STn=state.data.STOCK, Bn=state.data.DATA[i]; if(!Bn){ toast("This block has changed. Close the panel and open it again.",true); return; }
+    const picked=new Set([...document.querySelectorAll("[data-mvl]")].filter(c=>c.checked).map(c=>+c.dataset.mvl)), L=(Bn.lots||[]).filter((x,j)=>picked.has(j)); if(!L.length){ toast("Tick at least one bundle",true); return; }
     const l=loc(), net=L.flatMap(x=>x.net||[]), m2=Math.round(L.reduce((a,x)=>a+(+x.m2||0),0)*100)/100, pcs=L.reduce((a,x)=>a+(+x.pcs||0),0), ids=L.map(x=>x.id);
     const photos=uniqPhotos(L.filter(x=>x.img).map(x=>({img:x.img,fb:x.fb||""})));
     const from=`${ids.length===1?"Bundle":"Bundles"} ${ids.join(", ")} from block ${B.block}`+(B.seq?" — cut in sequence, can be book-matched":"")+".";
@@ -862,16 +903,16 @@ function moveBlock(i){
     if(into==="new"){
       const name=V("mvname"); if(!name){ toast("Give the stock item a name",true); return; }
       const r={name,m2,pcs,size:net.length?`${range(net.map(n=>n[1]))} × ${range(net.map(n=>n[0]))} cm`:"",note:from,img:photos[0]?photos[0].img:"",origin:null,finish:V("mvfinish")||null,
-        gallery:photos.length>1?photos.map(p=>p.img):null,cat:V("mvcat"),key:nextKey(ST,"s"),grp:3,loc:l,special:false};
+        gallery:photos.length>1?photos.map(p=>p.img):null,cat:V("mvcat"),key:nextKey(STn,"s"),grp:3,loc:l,special:false};
       if(photos[0]&&photos[0].fb) r.fb=photos[0].fb; if(B.hot) r.hot=true; if(!photos.length) r.hidden=true;
-      ST.push(r); what=`Moved ${ids.length} bundle${ids.length===1?"":"s"} of ${bName} to ${locName(l)}: new stock item ${name}${r.hidden?" (hidden until it has a photo)":""}`;
+      STn.push(r); what=`Moved ${ids.length} bundle${ids.length===1?"":"s"} of ${bName} to ${locName(l)}: new stock item ${name}${r.hidden?" (hidden until it has a photo)":""}`;
     }else{
-      const S=ST[+into], list=uniqPhotos([{img:S.img,fb:S.fb},...(S.gallery||[]).map(g=>({img:g})),...photos]);
+      const S=STn[+into], list=uniqPhotos([{img:S.img,fb:S.fb},...(S.gallery||[]).map(g=>({img:g})),...photos]);
       S.m2=Math.round(((+S.m2||0)+m2)*100)/100; S.pcs=(+S.pcs||0)+pcs; S.note=((S.note||"")+" + "+from).trim().replace(/^\+ /,"");
       if(list.length){ S.img=list[0].img; if(list[0].fb) S.fb=list[0].fb; S.gallery=list.length>1?list.map(p=>p.img):null; }
       what=`Moved ${ids.length} bundle${ids.length===1?"":"s"} of ${bName} to ${locName(l)}: added to ${S.name}`;
     }
-    const keep=lots.filter(x=>!L.includes(x)); if(keep.length) B.lots=keep; else state.data.DATA.splice(i,1);
+    const keep=(Bn.lots||[]).filter((x,j)=>!picked.has(j)); if(keep.length) Bn.lots=keep; else state.data.DATA.splice(i,1);
     if(await commit(what)) closeDrawer();
   });
 }
@@ -884,13 +925,13 @@ function editBlock(i){
     hideNote(B)+`<div class="grid2">${F("block","Block number",B.block,{cls:"mono",ph:"e.g. 4573"})}${F("cat","Category",B.cat,{select:CATS})}</div>
      ${F("material","Material · finish",B.material,{ph:"e.g. White Travertine · Raw"})}
      ${F("title","Display title (optional)",B.title||"",{hint:"Shown instead of “Block 4573”. Start with “Container” to count it as a container on the site."})}
-     <div class="checks">${C("arrived","Arrived · in stock",B.arrived)}${C("new","New",B.new)}${C("hot","★ Hot",B.hot)}${C("seq","Cut in sequence (book-match)",B.seq)}</div>`,
+     <div class="checks">${C("arrived","Arrived · in stock",B.arrived)}${C("hot","★ Hot",B.hot)}${C("seq","Cut in sequence (book-match)",B.seq)}</div>`,
     delFoot("Delete this block and all its bundles?",isNew?"":B.hidden?"Put back on site":"Hide block"));
-  const build=()=>{ const r={...B,block:V("block"),cat:V("cat"),material:V("material"),arrived:V("arrived"),new:V("new")}; const t=V("title"); if(t) r.title=t; else delete r.title; if(V("hot")) r.hot=true; else delete r.hot; if(V("seq")) r.seq=true; else delete r.seq;
+  const build=()=>{ const r={...B,block:V("block"),cat:V("cat"),material:V("material"),arrived:V("arrived")}; const t=V("title"); if(t) r.title=t; else delete r.title; if(V("hot")) r.hot=true; else delete r.hot; if(V("seq")) r.seq=true; else delete r.seq;
     if(!r.block&&!r.title){ toast("Give the block a number or a title",true); return null; } return r; };
-  wireFoot(async()=>{ const r=build(); if(!r) return; if(isNew) D.push(r); else D[i]=r; if(await commit((isNew?"Added ":"Updated ")+(r.title||"Block "+r.block))) closeDrawer(); },
-    isNew?null:async()=>{ D.splice(i,1); if(await commit("Deleted "+(B.title||"Block "+B.block))) closeDrawer(); },
-    async()=>{ const r=build(); if(!r) return; D[i]=withHidden(r,!B.hidden); if(await commit((B.hidden?"Put back on site: ":"Hidden from site: ")+(r.title||"Block "+r.block))) closeDrawer(); });
+  wireFoot(async()=>{ const r=build(); if(!r) return; if(isNew) state.data.DATA.push(r); else state.data.DATA[i]=r; if(await commit((isNew?"Added ":"Updated ")+(r.title||"Block "+r.block))) closeDrawer(); },
+    isNew?null:async()=>{ state.data.DATA.splice(i,1); if(await commit("Deleted "+(B.title||"Block "+B.block))) closeDrawer(); },
+    async()=>{ const r=build(); if(!r) return; state.data.DATA[i]=withHidden(r,!B.hidden); if(await commit((B.hidden?"Put back on site: ":"Hidden from site: ")+(r.title||"Block "+r.block))) closeDrawer(); });
 }
 /* ---- bundle (lot) ---- */
 function editLot(bi,li){
@@ -912,9 +953,9 @@ function editLot(bi,li){
   $("#calc").onclick=()=>{ const net=readNet(); $("#f_pcs").value=net.reduce((a,n)=>a+n[2],0); $("#f_m2").value=(net.reduce((a,n)=>a+n[0]*n[1]*n[2],0)/10000).toFixed(2); };
   const build=()=>{ const r={id:V("lid"),pcs:N("pcs"),m2:N("m2"),net:readNet()}; if(photoState.lot.img){ r.img=photoState.lot.img; if(photoState.lot.fb) r.fb=photoState.lot.fb; } const lb=V("label"); if(lb) r.label=lb; if(L.hidden) r.hidden=true;
     if(!r.id){ toast("Give the bundle a number",true); return null; } return r; };
-  wireFoot(async()=>{ const r=build(); if(!r) return; if(isNew) B.lots.push(r); else B.lots[li]=r; if(await commit((isNew?"Added bundle ":"Updated bundle ")+r.id)) closeDrawer(); },
-    isNew?null:async()=>{ B.lots.splice(li,1); if(await commit("Removed bundle "+L.id)) closeDrawer(); },
-    async()=>{ const r=build(); if(!r) return; B.lots[li]=withHidden(r,!L.hidden); if(await commit((L.hidden?"Put back on site: bundle ":"Hidden from site: bundle ")+r.id)) closeDrawer(); });
+  wireFoot(async()=>{ const r=build(); if(!r) return; if(isNew) state.data.DATA[bi].lots.push(r); else state.data.DATA[bi].lots[li]=r; if(await commit((isNew?"Added bundle ":"Updated bundle ")+r.id)) closeDrawer(); },
+    isNew?null:async()=>{ state.data.DATA[bi].lots.splice(li,1); if(await commit("Removed bundle "+L.id)) closeDrawer(); },
+    async()=>{ const r=build(); if(!r) return; state.data.DATA[bi].lots[li]=withHidden(r,!L.hidden); if(await commit((L.hidden?"Put back on site: bundle ":"Hidden from site: bundle ")+r.id)) closeDrawer(); });
 }
 /* ---- stock ---- */
 function editStock(i){
@@ -938,9 +979,9 @@ function editStock(i){
     const L=listState.st.list; r.img=L[0]?L[0].img:""; if(L[0]&&L[0].fb) r.fb=L[0].fb; else delete r.fb; r.gallery=L.length>1?L.map(p=>p.img):null;
     const pr=V("price"); if(pr) r.price=pr; else delete r.price; if(V("hot")) r.hot=true; else delete r.hot;
     if(!r.name){ toast("Give the material a name",true); return null; } return r; };
-  wireFoot(async()=>{ const r=build(); if(!r) return; if(isNew) ST.push(r); else ST[i]=r; if(await commit((isNew?"Added ":"Updated ")+r.name)) closeDrawer(); },
-    isNew?null:async()=>{ ST.splice(i,1); if(await commit("Deleted from stock: "+S.name)) closeDrawer(); },
-    async()=>{ const r=build(); if(!r) return; ST[i]=withHidden(r,!S.hidden); if(await commit((S.hidden?"Put back on site: ":"Hidden from site: ")+r.name)) closeDrawer(); });
+  wireFoot(async()=>{ const r=build(); if(!r) return; const n=noPhotoHide(r); if(isNew) state.data.STOCK.push(r); else state.data.STOCK[i]=r; if(await commit((isNew?"Added ":"Updated ")+r.name+n)) closeDrawer(); },
+    isNew?null:async()=>{ state.data.STOCK.splice(i,1); if(await commit("Deleted from stock: "+S.name)) closeDrawer(); },
+    async()=>{ const r=build(); if(!r) return; if(S.hidden&&!r.img){ toast(needPhoto,true); return; } state.data.STOCK[i]=withHidden(r,!S.hidden); if(await commit((S.hidden?"Put back on site: ":"Hidden from site: ")+r.name)) closeDrawer(); });
 }
 /* ---- order ---- */
 function editOrder(i){
@@ -960,16 +1001,16 @@ function editOrder(i){
     const L=listState.or.list; r.img=L[0]?L[0].img:""; r.fb=L[0]&&L[0].fb?L[0].fb:null; if(L.length>1) r.shots=L.map(p=>({img:p.img,fb:p.fb||null})); else delete r.shots;
     const sel=V("sel"); if(sel) r.sel=sel; else delete r.sel; if(V("classic")) r.classic=true; else delete r.classic; if(V("isnew")) r.isnew=true; else delete r.isnew;
     if(!r.name){ toast("Give the material a name",true); return null; } return r; };
-  wireFoot(async()=>{ const r=build(); if(!r) return; if(isNew) OR.push(r); else OR[i]=r; if(await commit((isNew?"Added ":"Updated ")+r.name)) closeDrawer(); },
-    isNew?null:async()=>{ OR.splice(i,1); if(await commit("Deleted to-order item: "+O.name)) closeDrawer(); },
-    async()=>{ const r=build(); if(!r) return; OR[i]=withHidden(r,!O.hidden); if(await commit((O.hidden?"Put back on site: ":"Hidden from site: ")+r.name)) closeDrawer(); });
+  wireFoot(async()=>{ const r=build(); if(!r) return; const n=noPhotoHide(r); if(isNew) state.data.ORDER.push(r); else state.data.ORDER[i]=r; if(await commit((isNew?"Added ":"Updated ")+r.name+n)) closeDrawer(); },
+    isNew?null:async()=>{ state.data.ORDER.splice(i,1); if(await commit("Deleted to-order item: "+O.name)) closeDrawer(); },
+    async()=>{ const r=build(); if(!r) return; if(O.hidden&&!r.img){ toast(needPhoto,true); return; } state.data.ORDER[i]=withHidden(r,!O.hidden); if(await commit((O.hidden?"Put back on site: ":"Hidden from site: ")+r.name)) closeDrawer(); });
 }
 /* ---- project ---- */
 function editProject(i){
   const PR=state.data.PROJECTS, isNew=i<0, pin=!isNew&&pinned(i);
   const P=isNew?{name:"",loc:"",type:"Private villa",stone:"",shots:[],scope:"Supply & installation"}:clone(PR[i]);
   openDrawer(isNew?"New project":"Edit project",isNew?"":P.name,
-    hideNote(P)+(pin?`<div class="notice"><p><b>${state.pins&&state.pins.has(i)?"This project has a pin on the site's map.":"Projects up to this one are linked to pins on the site's map."}</b> Pins open projects by their place in the list, so this project can't be hidden: the pins would open the wrong projects.</p></div>`:"")+
+    hideNote(P)+(pin?`<div class="notice"><p><b>${state.pins&&state.pins.has(i)?"This project has a pin on the site's map.":"Projects up to this one are linked to pins on the site's map."}</b> Pins open projects by their place in the list, so this project can't be hidden or deleted: the pins would open the wrong projects. Everything else can be changed.</p></div>`:"")+
     `${F("name","Project name",P.name,{ph:"Dubai Hills Villa"})}
      <div class="grid2">${F("loc","Location",P.loc||"",{ph:"Dubai Hills Estate, Dubai"})}${F("type","Type",P.type||"")}</div>
      ${F("stone","Stone used",P.stone||"",{area:true})}
@@ -979,10 +1020,11 @@ function editProject(i){
   wireList();
   const build=()=>{ const r={...P,name:V("name"),loc:V("loc"),type:V("type"),stone:V("stone"),scope:V("scope"),shots:listState.prs.list.map(s=>{ const x={img:s.img,fb:s.fb||null}; if(s.rot) x.rot=s.rot; return x; })};
     const reel=V("reel").replace(/^.*\/reel\//,"").replace(/\/.*$/,""); if(reel) r.reel=reel; else delete r.reel;
-    if(!r.name){ toast("Give the project a name",true); return null; } return r; };
-  wireFoot(async()=>{ const r=build(); if(!r) return; if(isNew) PR.push(r); else PR[i]=r; if(await commit((isNew?"Added project ":"Updated project ")+r.name)) closeDrawer(); },
-    isNew?null:async()=>{ PR.splice(i,1); if(await commit("Deleted project "+P.name)) closeDrawer(); },
-    async()=>{ if(pinned(i)) return; const r=build(); if(!r) return; PR[i]=withHidden(r,!P.hidden); if(await commit((P.hidden?"Put back on site: ":"Hidden from site: ")+r.name)) closeDrawer(); });
+    if(!r.name){ toast("Give the project a name",true); return null; }
+    if(!r.shots.length&&!r.hidden){ toast("Add at least one photo: a project without photos can't be shown on the site.",true); return null; } return r; };
+  wireFoot(async()=>{ const r=build(); if(!r) return; if(isNew) state.data.PROJECTS.push(r); else state.data.PROJECTS[i]=r; if(await commit((isNew?"Added project ":"Updated project ")+r.name)) closeDrawer(); },
+    isNew||pin?null:async()=>{ if(pinned(i)) return; state.data.PROJECTS.splice(i,1); if(await commit("Deleted project "+P.name)) closeDrawer(); },
+    async()=>{ if(pinned(i)) return; const r=build(); if(!r) return; if(P.hidden&&!r.shots.length){ toast(needPhoto,true); return; } state.data.PROJECTS[i]=withHidden(r,!P.hidden); if(await commit((P.hidden?"Put back on site: ":"Hidden from site: ")+r.name)) closeDrawer(); });
 }
 
 /* ============================ boot ============================ */

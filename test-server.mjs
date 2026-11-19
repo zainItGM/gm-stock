@@ -2,12 +2,19 @@
 // Start:  node test-server.mjs        then open http://localhost:8080/admin/
 // Test password is "test" (or set ADMIN_PASSWORD=yourpassword before the command).
 // Everything saved in the admin goes into test-data/ (quantities, photos). Nothing goes online.
+// Storage runs on Netlify's own local Blobs server, so the function's code is exactly what runs on Netlify.
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { join, normalize, extname } from "node:path";
 
+import { BlobsServer } from "@netlify/blobs/server";
+
 process.env.ADMIN_PASSWORD ||= "test";
-process.env.GM_DEV_STORE = join(process.cwd(), "test-data");
+// Netlify's local stand-in for its Blobs storage, keeping its files in test-data/
+const blobs = new BlobsServer({ directory: join(process.cwd(), "test-data"), token: "local-test" });
+const { port: blobsPort } = await blobs.start();
+const blobsURL = "http://localhost:" + blobsPort;
+process.env.NETLIFY_BLOBS_CONTEXT = Buffer.from(JSON.stringify({ edgeURL: blobsURL, uncachedEdgeURL: blobsURL, token: "local-test", siteID: "local-test" })).toString("base64");
 const { default: api } = await import("./netlify/functions/api.mjs");
 
 const PORT = Number(process.env.PORT || 8080);

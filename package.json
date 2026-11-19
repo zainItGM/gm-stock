@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@netlify/blobs": "11.1.9"
+    "@netlify/blobs": "11.1.6"
   },
   "scripts": {
     "test-site": "node test-server.mjs",

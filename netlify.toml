@@ -2,6 +2,10 @@
   publish = "site"
   functions = "netlify/functions"
 
+# @netlify/blobs needs Node 22 or newer (same as the mosaic site)
+[build.environment]
+  NODE_VERSION = "22"
+
 [[headers]]
   for = "/admin/*"
   [headers.values]

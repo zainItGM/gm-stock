@@ -12,7 +12,8 @@ netlify.toml           tells Netlify what to publish
 Try it first, without Netlify (needs Node.js):
   node test-server.mjs
   then open http://localhost:8080/admin/   password: test
-  (everything saved goes into test-data/; nothing goes online)
+  (everything saved goes into test-data/; nothing goes online. Storage runs on Netlify's own
+  local Blobs server, so the function code tested here is exactly what runs on Netlify.)
 
 Deploying (from the Codespace terminal, or any computer with Node.js):
   One time only:
@@ -41,7 +42,8 @@ The admin:
              the list, special price, hot flag, main photo and gallery. Delete when sold.
   To order   the "brought in to order" catalogue: always-available classics, new selections.
   Projects   the projects tab: name, location, type, stone, scope, Instagram reel, photos.
-             Map pins on the site are matched to projects by position, so add new ones at the end.
+             Map pins on the site open projects by their place in the list: the projects with a pin
+             can be edited but not deleted, hidden or moved. New projects go at the end.
   History    every save, newest first (the last 40 are kept). See below.
   Settings   enquiry email and WhatsApp number, JSON backup / restore, sign out.
 
@@ -84,6 +86,21 @@ Excel: "Download Excel" (Overview, Cargo, Stock, To order) downloads what is sav
   To order        the order catalogue with availability, selection, flags, status, photos
   Summary         the totals the website shows, per place (showroom / factory), hidden items
                   left out, and how many are hidden
+
+Photos are required to show an item: a stock or to-order item saved without a photo is kept
+hidden from the site until it has one (its card would show an empty picture), and a project
+needs at least one photo (the server refuses a visible project without one, because the site's
+Projects tab would stop working). Cargo bundles may have no photo: the site shows "Photo on loading".
+
+Checking photos: a thumbnail whose link doesn't load shows "link not working" in the admin.
+"Check all photo links" on the Overview loads every photo the way a visitor's browser does and
+lists the items whose photos don't load. For Google Drive photos, the usual cause is that the
+file isn't shared as "anyone with the link can view".
+
+If the connection drops while saving, the admin says "Not saved", keeps the edit panel open and
+goes back to showing what is really saved; press Save again once the internet is back.
+If the live data can't be loaded for any reason, the website shows the catalogue built into
+site/index.html instead of breaking.
 
 Saving: every change is saved as one whole catalogue. If two people save at the same moment,
 the second one is refused and the admin reloads, so nothing is overwritten silently.

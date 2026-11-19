@@ -1,5 +1,5 @@
 // GM Stone catalogue API — one Netlify Function serving /api/*
-// (test-server.mjs runs this same file locally, with GM_DEV_STORE pointing at a folder.)
+// (test-server.mjs runs this same file locally, against Netlify's own local Blobs server.)
 //
 //   GET  /api/data.js        live data as a script the public site loads (window.GM_LIVE);
 //                            items marked hidden are left out, so the site never sees them
@@ -14,12 +14,13 @@
 //   GET  /api/img/<id>       serve an uploaded image
 //   GET  /api/status         { configured, hasData }
 //
-// Settings (Netlify → Site configuration → Environment variables):
+// Settings (Netlify → Project configuration → Environment variables):
 //   ADMIN_PASSWORD   required — the password for /admin/
 //   ADMIN_SECRET     optional — signs login tokens (defaults to a value derived from the password)
 //   ADMIN_TOKEN_DAYS optional — how long a login lasts (default 14)
 
 import { createHmac, timingSafeEqual, randomBytes, createHash } from "node:crypto";
+import { getStore } from "@netlify/blobs";
 
 const STORE_NAME = "gmstone";
 const DATA_KEY = "data";
@@ -30,25 +31,7 @@ const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "we
 
 export const config = { path: "/api/*" };
 
-/* ---------------- storage ---------------- */
-async function openStore() {
-  if (process.env.GM_DEV_STORE) return fileStore(process.env.GM_DEV_STORE); // local testing only
-  const { getStore } = await import("@netlify/blobs");
-  return getStore({ name: STORE_NAME, consistency: "strong" });
-}
-async function fileStore(dir) {
-  const fs = await import("node:fs/promises");
-  const path = await import("node:path");
-  await fs.mkdir(dir, { recursive: true });
-  const p = k => path.join(dir, k.replace(/[^A-Za-z0-9._-]/g, "_"));
-  return {
-    async get(k, o = {}) { try { const b = await fs.readFile(p(k)); return o.type === "json" ? JSON.parse(b.toString()) : o.type === "arrayBuffer" ? b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) : b.toString(); } catch { return null; } },
-    async getWithMetadata(k, o = {}) { const data = await this.get(k, o); if (data == null) return null; let metadata = {}; try { metadata = JSON.parse(await fs.readFile(p(k) + ".meta")); } catch {} return { data, metadata }; },
-    async setJSON(k, v) { await fs.writeFile(p(k), JSON.stringify(v)); },
-    async set(k, v, o = {}) { await fs.writeFile(p(k), Buffer.from(v)); await fs.writeFile(p(k) + ".meta", JSON.stringify(o.metadata || {})); },
-    async delete(k) { await fs.rm(p(k), { force: true }); await fs.rm(p(k) + ".meta", { force: true }); },
-  };
-}
+const openStore = () => getStore({ name: STORE_NAME, consistency: "strong" });
 
 /* ---------------- what the public site gets ---------------- */
 // Items with hidden: true stay in the admin but are left out of the site's data.
@@ -91,24 +74,42 @@ function tokenOk(req) {
   const h = req.headers.get("authorization") || "";
   const t = req.headers.get("x-admin-token") || (h.startsWith("Bearer ") ? h.slice(7) : "");
   const [exp, sig] = t.split(".");
-  if (!exp || !sig || Number(exp) < Date.now()) return false;
+  if (!exp || !sig || !(Number(exp) > Date.now())) return false;
   const want = Buffer.from(sign(exp)), got = Buffer.from(sig);
   return want.length === got.length && timingSafeEqual(want, got);
 }
 function passwordOk(given) {
-  const want = Buffer.from(process.env.ADMIN_PASSWORD || ""), got = Buffer.from(String(given || ""));
-  return want.length > 0 && want.length === got.length && timingSafeEqual(want, got);
+  if (!process.env.ADMIN_PASSWORD) return false;
+  const hash = s => createHash("sha256").update(String(s ?? "")).digest(); // equal lengths, so the comparison takes the same time
+  return timingSafeEqual(hash(given), hash(process.env.ADMIN_PASSWORD));
 }
 
 /* ---------------- helpers ---------------- */
 const json = (obj, status = 200, extra = {}) => new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...extra } });
 const err = (msg, status) => json({ error: msg }, status);
+const js = (body, extra = {}) => new Response(body, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "no-cache, max-age=0, must-revalidate", ...extra } });
 const SHAPE = ["DATA", "STOCK", "ORDER", "PROJECTS"];
+const isObj = x => x && typeof x === "object" && !Array.isArray(x);
+// The public page's code expects these shapes; anything else could stop it from drawing.
 function validData(d) {
-  if (!d || typeof d !== "object") return "no data";
+  if (!isObj(d)) return "no data";
   for (const k of SHAPE) if (!Array.isArray(d[k])) return k + " must be a list";
   if (typeof d.ENQ_TO !== "string" || typeof d.WA_NO !== "string") return "ENQ_TO and WA_NO must be text";
-  for (const k of SHAPE) for (const it of d[k]) if (JSON.stringify(it).length > 400000) return "an item in " + k + " is too large — use an uploaded photo instead of an embedded one";
+  for (const k of SHAPE) for (const it of d[k]) {
+    if (!isObj(it)) return "every item in " + k + " must be an object";
+    if (JSON.stringify(it).length > 400000) return "an item in " + k + " is too large — use an uploaded photo instead of an embedded one";
+  }
+  for (const B of d.DATA) {
+    if (!Array.isArray(B.lots)) return "cargo block " + (B.block || "?") + " has no bundle list";
+    for (const l of B.lots) if (!isObj(l) || typeof l.id !== "string" || !Array.isArray(l.net)) return "a bundle in block " + (B.block || "?") + " is incomplete";
+  }
+  for (const S of d.STOCK) if (typeof S.name !== "string" || !S.name) return "a stock item has no name";
+  for (const O of d.ORDER) if (typeof O.name !== "string" || !O.name) return "a to-order item has no name";
+  for (const P of d.PROJECTS) {
+    if (typeof P.name !== "string" || !Array.isArray(P.shots)) return "a project has no name or photo list";
+    // the site's Projects tab stops working if a project it shows has no photo
+    if (!P.hidden && !(P.shots[0] && P.shots[0].img)) return `project “${P.name}” needs at least one photo to be shown on the site`;
+  }
   return null;
 }
 
@@ -117,15 +118,26 @@ export default async function handler(req) {
   const url = new URL(req.url);
   const route = url.pathname.replace(/^\/api\/?/, "").replace(/\/+$/, "");
   const m = req.method;
+
+  // The public page loads this before its own script. Whatever happens it must stay valid
+  // JavaScript: on any problem the page simply uses the copy of the catalogue built into it.
+  if (route === "data.js" && m === "GET") {
+    try {
+      const doc = await openStore().get(DATA_KEY, { type: "json" });
+      if (!doc || !doc.data) return js("/* no live data yet: the page uses its built-in catalogue */");
+      const etag = `"rev-${doc.rev}"`;
+      if ((req.headers.get("if-none-match") || "").includes(etag)) return new Response(null, { status: 304, headers: { etag, "cache-control": "no-cache, max-age=0, must-revalidate" } });
+      return js("window.GM_LIVE=" + JSON.stringify(forSite(doc.data)).replace(/</g, "\\u003c") + ";", { etag });
+    } catch (e) {
+      console.error("data.js:", e.message);
+      return js("/* live data unavailable: the page uses its built-in catalogue */");
+    }
+  }
+
   let store;
-  try { store = await openStore(); } catch (e) { return err("storage unavailable: " + e.message, 500); }
+  try { store = openStore(); } catch (e) { return err("storage unavailable: " + e.message, 500); }
 
   try {
-    if (route === "data.js" && m === "GET") {
-      const doc = await store.get(DATA_KEY, { type: "json" });
-      const body = doc && doc.data ? "window.GM_LIVE=" + JSON.stringify(forSite(doc.data)).replace(/</g, "\\u003c") + ";" : "/* no live data yet */";
-      return new Response(body, { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "no-cache, max-age=0, must-revalidate" } });
-    }
     if (route === "status" && m === "GET") {
       const doc = await store.get(DATA_KEY, { type: "json" });
       return json({ configured: !!process.env.ADMIN_PASSWORD, hasData: !!(doc && doc.data), rev: doc ? doc.rev : 0, updatedAt: doc ? doc.updatedAt : null });
@@ -142,7 +154,8 @@ export default async function handler(req) {
       const got = await store.getWithMetadata("img/" + id, { type: "arrayBuffer" });
       if (!got || !got.data) return err("not found", 404);
       const type = (got.metadata && got.metadata.type) || "image/jpeg";
-      return new Response(got.data, { headers: { "content-type": type, "cache-control": "public, max-age=31536000, immutable" } });
+      // an uploaded photo never changes (a new upload gets a new name), so browsers and Netlify's edge may keep it
+      return new Response(got.data, { headers: { "content-type": type, "cache-control": "public, max-age=31536000, immutable", "netlify-cdn-cache-control": "public, max-age=31536000, immutable, durable" } });
     }
 
     // everything below needs a valid login
@@ -174,7 +187,8 @@ export default async function handler(req) {
     }
     if (route === "restore" && m === "POST") {
       const body = await req.json().catch(() => ({}));
-      const old = await store.get(histKey(Number(body.rev)), { type: "json" });
+      const rev = Number(body.rev);
+      const old = Number.isInteger(rev) && rev > 0 ? await store.get(histKey(rev), { type: "json" }) : null;
       if (!old) return err("That version is no longer kept", 404);
       const cur = await store.get(DATA_KEY, { type: "json" });
       const curRev = cur ? cur.rev : 0;
@@ -194,6 +208,7 @@ export default async function handler(req) {
     }
     return err("not found", 404);
   } catch (e) {
+    console.error("api:", route, e.message);
     return err("server error: " + e.message, 500);
   }
 }
