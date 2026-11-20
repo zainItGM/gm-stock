@@ -55,6 +55,23 @@ or upload several at once. Uploads are resized to 1600 px in the browser and sto
 Netlify Blobs (served from /api/img/...). Photos built into the page stay in site/img/.
 Cargo bundles have one photo each.
 
+Slabs and m²: type the number of slabs and m² is worked out as slabs × one slab's area. The
+area comes from the slab size ("302 × 200 cm" = 6.04 m²); for approximate or mixed sizes
+("≈293 × 178 cm", "180–300 × 110–167 cm") the item's own average slab is used. The line under the
+boxes shows the working; m² can still be typed by hand. Cargo bundles do the same from their size
+rows. Leave slabs and m² empty for "quantity on request".
+
+Sold out: saving a stock item at 0 slabs or 0 m² asks what the site should show:
+  Move to "Brought in to order" (default) - it becomes an order card with its name, category,
+                  photos and description, marked "Sold out in Dubai at the moment — supplied to
+                  order". If the stone is already in the order list (e.g. a classic), that card
+                  is used; no second card. The stock item is removed.
+  Hide from the site - for one-off lots that can't be ordered again.
+  Keep in stock as "quantity on request".
+When it arrives again, open it under "To order" and press "Move to stock…": enter the slabs (m²
+follows) and it becomes a stock item again, with the slab size, finish and location it had before.
+Always-available classics stay in the order list as well.
+
 Moving cargo into stock: when a container lands, press "Move to stock…" on its block.
 Choose where it went (Dubai showroom or Sharjah factory), tick the bundles (untick some to
 split a block between the two), and put them into a new stock item or add them to an existing

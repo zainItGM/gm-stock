@@ -210,6 +210,11 @@ td .sub{color:var(--muted);font-size:12.5px;max-width:42ch;overflow:hidden;text-
 .mvlots{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);background:var(--surface);padding:10px 12px;max-height:240px;overflow:auto}
 .bar .lab{font-family:var(--m);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 
+/* sold out */
+.sold{display:flex;flex-direction:column;gap:8px;width:100%}
+.sold p{margin:0}
+.soldbtns{display:flex;gap:8px;flex-wrap:wrap}
+
 /* history */
 .diff{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:var(--ink)}
 .diff b{font-weight:600}
@@ -594,7 +599,7 @@ function diffData(cur,old){
   const out=[], E=s=>esc(s), J=x=>JSON.stringify(x);
   const n=v=>v==null||v===""?"—":String(v);
   const fields={m2:"m²",pcs:"slabs",size:"slab size",name:"name",note:"description",finish:"finish",origin:"origin",cat:"category",price:"special price",special:"special-price flag",hot:"hot flag",grp:"position in list",loc:"location",
-    img:"main photo",gallery:"photos",shots:"photos",block:"availability line",sel:"selection",classic:"always-available flag",isnew:"new flag",type:"type",stone:"stone",scope:"scope",reel:"reel",
+    img:"main photo",gallery:"photos",shots:"photos",block:"availability line",fromStock:"stock details",sel:"selection",classic:"always-available flag",isnew:"new flag",type:"type",stone:"stone",scope:"scope",reel:"reel",
     material:"material",title:"title",arrived:"arrived / arriving",seq:"book-match flag",lots:"bundles",label:"card size",net:"sizes",id:"bundle number"};
   const what=(a,b)=>{ const ks=[...new Set([...Object.keys(a),...Object.keys(b)])].filter(k=>k!=="hidden"&&k!=="fb"&&J(a[k])!==J(b[k]));
     return ks.map(k=>(k==="m2"||k==="pcs")?`${fields[k]} ${E(n(a[k]))} → ${E(n(b[k]))}`:(fields[k]||k)).filter((x,i,arr)=>x&&arr.indexOf(x)===i).join(", "); };
@@ -941,47 +946,112 @@ function editLot(bi,li){
   openDrawer(isNew?"New bundle":"Edit bundle",(B.title||"Block "+B.block)+" · "+B.material,
     (B.hidden?`<div class="notice"><p>The whole block is hidden from the site, so this bundle is hidden too.</p></div>`:hideNote(L))+
     `<div class="grid3">${F("lid","Bundle no.",L.id,{cls:"mono"})}${F("pcs","Slabs",L.pcs,{type:"number"})}${F("m2","m²",L.m2,{type:"number",step:"0.01"})}</div>
-     <div class="field"><label>Net slab sizes · width × length cm × pieces</label><div class="sizes" id="sizes">${sizeRows()}</div><div class="bar" style="margin-top:6px"><button class="btn sm" id="addSize">+ Size</button><button class="btn sm ghost" id="calc">Calculate m² and slabs from sizes</button></div></div>
+     <div class="field"><label>Net slab sizes · width × length cm × pieces</label><div class="sizes" id="sizes">${sizeRows()}</div><div class="bar" style="margin-top:6px"><button class="btn sm" id="addSize">+ Size</button><span class="hint">Slabs and m² are worked out from the sizes as you type; you can still change them.</span></div></div>
      ${F("label","Sawn size on the card (optional)",L.label||"",{hint:"Shown under the sizes, e.g. “2 × 132 × 243 · 12 pcs”."})}
      ${photoField("lot",L.img,L.fb,"Bundle photo")}`,
     delFoot("Remove this bundle from the block?",isNew?"":L.hidden?"Put back on site":"Hide bundle"));
   wirePhotos();
   const readNet=()=>{ const rows={}; document.querySelectorAll("[data-n]").forEach(i=>{ const [r,c]=i.dataset.n.split(":"); (rows[r]=rows[r]||[0,0,0])[+c]=parseFloat(i.value)||0; }); return Object.values(rows).filter(n=>n[0]||n[1]||n[2]); };
-  const rewire=()=>{ document.querySelectorAll("[data-nx]").forEach(b=>b.onclick=()=>{ L.net=readNet(); L.net.splice(+b.dataset.nx,1); if(!L.net.length) L.net=[[0,0,0]]; $("#sizes").innerHTML=sizeRows(); rewire(); }); };
+  const rewire=()=>{ document.querySelectorAll("[data-nx]").forEach(b=>b.onclick=()=>{ L.net=readNet(); L.net.splice(+b.dataset.nx,1); if(!L.net.length) L.net=[[0,0,0]]; $("#sizes").innerHTML=sizeRows(); rewire(); calc(); }); };
   rewire();
   $("#addSize").onclick=()=>{ L.net=readNet(); L.net.push([0,0,0]); $("#sizes").innerHTML=sizeRows(); rewire(); };
-  $("#calc").onclick=()=>{ const net=readNet(); $("#f_pcs").value=net.reduce((a,n)=>a+n[2],0); $("#f_m2").value=(net.reduce((a,n)=>a+n[0]*n[1]*n[2],0)/10000).toFixed(2); };
+    const calc=()=>{ const net=readNet(); if(!net.length) return; $("#f_pcs").value=net.reduce((a,n)=>a+n[2],0); $("#f_m2").value=(net.reduce((a,n)=>a+n[0]*n[1]*n[2],0)/10000).toFixed(2); };
+  $("#sizes").addEventListener("input",calc);
   const build=()=>{ const r={id:V("lid"),pcs:N("pcs"),m2:N("m2"),net:readNet()}; if(photoState.lot.img){ r.img=photoState.lot.img; if(photoState.lot.fb) r.fb=photoState.lot.fb; } const lb=V("label"); if(lb) r.label=lb; if(L.hidden) r.hidden=true;
     if(!r.id){ toast("Give the bundle a number",true); return null; } return r; };
   wireFoot(async()=>{ const r=build(); if(!r) return; if(isNew) state.data.DATA[bi].lots.push(r); else state.data.DATA[bi].lots[li]=r; if(await commit((isNew?"Added bundle ":"Updated bundle ")+r.id)) closeDrawer(); },
     isNew?null:async()=>{ state.data.DATA[bi].lots.splice(li,1); if(await commit("Removed bundle "+L.id)) closeDrawer(); },
     async()=>{ const r=build(); if(!r) return; state.data.DATA[bi].lots[li]=withHidden(r,!L.hidden); if(await commit((L.hidden?"Put back on site: bundle ":"Hidden from site: bundle ")+r.id)) closeDrawer(); });
 }
+/* ---- m² from slabs ----
+   One slab's area comes from the slab size ("302 × 200 cm" = 6.04 m²). For approximate or mixed sizes
+   ("≈293 × 178 cm", "180–300 × 110–167 cm", "cut sizes …") the item's own average slab (saved m² ÷ slabs)
+   is used instead, because that is what was actually measured. */
+const num=s=>parseFloat(String(s).replace(",","."));
+function slabArea(size,savedM2,savedPcs){
+  const s=String(size||""), avg=(savedM2>0&&savedPcs>0)?savedM2/savedPcs:null;
+  const m=s.match(/(\d+(?:[.,]\d+)?)\s*[×xX*]\s*(\d+(?:[.,]\d+)?)/);
+  const mixed=/\d\s*[–-]\s*\d/.test(s), approx=/≈|~|approx|cut|request/i.test(s);
+  if(m&&!mixed&&!approx) return {area:num(m[1])*num(m[2])/1e4, how:`${m[1]} × ${m[2]} cm`};
+  if(avg) return {area:avg, how:"the average slab of this item"};
+  if(m&&!mixed) return {area:num(m[1])*num(m[2])/1e4, how:`about ${m[1]} × ${m[2]} cm`};
+  return null;
+}
+/* typing the slabs (or changing the slab size) fills in m²; m² can still be typed by hand afterwards */
+function wireAutoM2(pcsId,sizeId,m2Id,howId,savedM2,savedPcs){
+  const run=()=>{ const pcs=$("#f_"+pcsId).value.trim(), how=$("#"+howId); if(!how) return;
+    if(pcs===""){ how.textContent="Type the slabs and m² is worked out from the slab size. Leave both empty for “quantity on request”."; return; }
+    const a=slabArea($("#f_"+sizeId).value,savedM2,savedPcs), n=num(pcs);
+    if(!a||isNaN(n)){ how.textContent="Enter the slab size (e.g. 302 × 200 cm) to work out m² from the slabs."; return; }
+    $("#f_"+m2Id).value=(Math.round(n*a.area*100)/100).toFixed(2);
+    how.textContent=`m² = ${n} slab${n===1?"":"s"} × ${a.area.toFixed(2)} m² (${a.how}). You can still change it.`; };
+  $("#f_"+pcsId).addEventListener("input",run); $("#f_"+sizeId).addEventListener("input",run);
+  const how=$("#"+howId); if(how) how.textContent=$("#f_"+pcsId).value.trim()===""?"Type the slabs and m² is worked out from the slab size. Leave both empty for “quantity on request”.":"Change the slabs and m² follows (slab size × slabs).";
+}
+
+/* ---- sold out: a stock item becomes a "Brought in to order" item ---- */
+const SOLD_NOTE="Sold out in Dubai at the moment — supplied to order.";
+const sameName=(a,b)=>String(a||"").trim().toUpperCase()===String(b||"").trim().toUpperCase();
+function stockToOrder(r){
+  const OR=state.data.ORDER, photos=uniqPhotos([{img:r.img,fb:r.fb},...(r.gallery||[]).map(g=>({img:g}))]);
+  // remembered, so "Move to stock…" can fill them in when the stone comes back
+  const fromStock={size:r.size||"",finish:r.finish||null,origin:r.origin||null,loc:r.loc||"Dubai",grp:r.grp||3,key:r.key};
+  const k=OR.findIndex(o=>sameName(o.name,r.name));
+  if(k>=0){ // already in the order catalogue (e.g. a classic): update it instead of adding a second card
+    const o=OR[k]; o.fromStock=fromStock;
+    if(!o.img&&photos[0]){ o.img=photos[0].img; o.fb=photos[0].fb||null; if(photos.length>1) o.shots=photos.map(p=>({img:p.img,fb:p.fb||null})); }
+    if(o.hidden&&o.img) delete o.hidden;
+    return {name:o.name,merged:true};
+  }
+  const o={name:r.name,block:"brought in to order",cat:r.cat,img:photos[0]?photos[0].img:"",fb:photos[0]&&photos[0].fb?photos[0].fb:null,key:nextKey(OR,"o"),
+    note:[String(r.note||"").trim(),SOLD_NOTE].filter(Boolean).join(" "),fromStock};
+  if(photos.length>1) o.shots=photos.map(p=>({img:p.img,fb:p.fb||null}));
+  noPhotoHide(o); OR.push(o); return {name:o.name,merged:false,hidden:!!o.hidden};
+}
+
 /* ---- stock ---- */
 function editStock(i){
   const ST=state.data.STOCK, isNew=i<0;
-  const S=isNew?{name:"",m2:0,pcs:0,size:"",note:"",img:"",origin:null,finish:"Polished",gallery:null,cat:"Marble",key:nextKey(ST,"s"),grp:3,loc:"Dubai",special:false}:clone(ST[i]);
+  const S=isNew?{name:"",m2:null,pcs:null,size:"",note:"",img:"",origin:null,finish:"Polished",gallery:null,cat:"Marble",key:nextKey(ST,"s"),grp:3,loc:"Dubai",special:false}:clone(ST[i]);
   // the card photo (img) first, then the gallery; on the site the gallery is what opens when the photo is clicked
   const photos=[{img:S.img,fb:S.fb},...(S.gallery||[]).map(g=>({img:g}))];
+  const foot=delFoot("Delete this material for good? To take it off the site but keep it, use “Hide from site”.",isNew?"":S.hidden?"Put back on site":"Hide from site");
   openDrawer(isNew?"New stock item":"Edit stock item",isNew?"":S.name,
     hideNote(S)+`${F("name","Material name",S.name,{ph:"e.g. CALACATTA VIOLA"})}
      <div class="grid2">${F("cat","Category",S.cat,{select:CATS})}${F("finish","Finish",S.finish||"",{ph:"Polished · bookmatched"})}</div>
-     <p class="hint" style="margin:0">Leave m² or slabs empty when the quantity is on request: the site then shows “Ask · quantity on request”.</p>
-     <div class="grid3">${F("m2","m² available",S.m2,{type:"number",step:"0.01",ph:"on request"})}${F("pcs","Slabs",S.pcs,{type:"number",ph:"—"})}${F("size","Slab size",S.size||"",{ph:"302 × 200 cm"})}</div>
+     <div class="grid3">${F("pcs","Slabs",S.pcs,{type:"number",ph:"—"})}${F("size","Slab size",S.size||"",{ph:"302 × 200 cm"})}${F("m2","m² available",S.m2,{type:"number",step:"0.01",ph:"on request"})}</div>
+     <p class="hint" id="m2how" style="margin:-6px 0 0"></p>
      ${F("note","Description",S.note||"",{area:true})}
      <div class="grid2">${F("origin","Origin",S.origin||"",{ph:"Italy"})}${locSelect("loc",S.loc)}</div>
      <div class="grid2">${F("grp","Position in list",["1","2","3"].includes(String(S.grp))?String(S.grp):"3",{select:["1","2","3"],hint:"1 shows first, 3 last within its category."})}${F("price","Special price · AED per m² (optional)",S.price||"",{cls:"mono"})}</div>
      <div class="checks">${C("special","Special price",S.special)}${C("hot","★ Hot · featured",S.hot)}</div>
      ${photoList("st",photos,{label:"Photos",main:"Card photo",hint:"The first photo is on the card. Clicking it on the site shows all of them in this order."})}`,
-    delFoot("Delete this material for good? To take it off the site but keep it, use “Hide from site”.",isNew?"":S.hidden?"Put back on site":"Hide from site"));
-  wireList();
+    foot);
+  wireList(); wireAutoM2("pcs","size","m2","m2how",S.m2,S.pcs);
   const build=()=>{ const r={...S,name:V("name"),cat:V("cat"),finish:V("finish")||null,m2:NN("m2"),pcs:NN("pcs"),size:V("size"),note:V("note"),origin:V("origin")||null,loc:V("loc")||"Dubai",grp:+V("grp")||3,special:V("special")};
     const L=listState.st.list; r.img=L[0]?L[0].img:""; if(L[0]&&L[0].fb) r.fb=L[0].fb; else delete r.fb; r.gallery=L.length>1?L.map(p=>p.img):null;
     const pr=V("price"); if(pr) r.price=pr; else delete r.price; if(V("hot")) r.hot=true; else delete r.hot;
     if(!r.name){ toast("Give the material a name",true); return null; } return r; };
-  wireFoot(async()=>{ const r=build(); if(!r) return; const n=noPhotoHide(r); if(isNew) state.data.STOCK.push(r); else state.data.STOCK[i]=r; if(await commit((isNew?"Added ":"Updated ")+r.name+n)) closeDrawer(); },
-    isNew?null:async()=>{ state.data.STOCK.splice(i,1); if(await commit("Deleted from stock: "+S.name)) closeDrawer(); },
-    async()=>{ const r=build(); if(!r) return; if(S.hidden&&!r.img){ toast(needPhoto,true); return; } state.data.STOCK[i]=withHidden(r,!S.hidden); if(await commit((S.hidden?"Put back on site: ":"Hidden from site: ")+r.name)) closeDrawer(); });
+  const put=r=>{ if(isNew) state.data.STOCK.push(r); else state.data.STOCK[i]=r; };
+  const saveNormal=async r=>{ const n=noPhotoHide(r); put(r); if(await commit((isNew?"Added ":"Updated ")+r.name+n)) closeDrawer(); };
+  const onDel=isNew?null:async()=>{ state.data.STOCK.splice(i,1); if(await commit("Deleted from stock: "+S.name)) closeDrawer(); };
+  const onHide=async()=>{ const r=build(); if(!r) return; if(S.hidden&&!r.img){ toast(needPhoto,true); return; } state.data.STOCK[i]=withHidden(r,!S.hidden); if(await commit((S.hidden?"Put back on site: ":"Hidden from site: ")+r.name)) closeDrawer(); };
+  const restoreFoot=()=>{ $("#dfoot").innerHTML=foot; wireFoot(onSave,onDel,onHide); };
+  // saving at 0 m² or 0 slabs: the stone is sold out, so ask what the site should show instead of "0.00 m² available"
+  const soldOut=r=>{
+    const exists=state.data.ORDER.some(o=>sameName(o.name,r.name));
+    $("#dfoot").innerHTML=`<div class="sold"><p><b>${esc(r.name)} is sold out.</b> What should the site show?</p>
+      <div class="soldbtns"><button class="btn amber" id="soToOrder">${exists?"Show it under “Brought in to order”":"Move to “Brought in to order”"}</button><button class="btn" id="soHide">Hide from the site</button><button class="btn" id="soAsk">Keep in stock as “quantity on request”</button><button class="btn ghost" id="soBack">Back</button></div>
+      <p class="hint">${exists?"It is already in the order catalogue, so that card is used (no second card); the stock item is removed."
+        :"It becomes an order card with its name, category, photos and description, marked “Sold out in Dubai at the moment — supplied to order”. The stock item is removed; “Move to stock…” brings it back."} One-off lots that can't be ordered again: hide them.</p></div>`;
+    $("#soBack").onclick=restoreFoot;
+    $("#soAsk").onclick=()=>busy("soAsk",async()=>{ r.m2=null; r.pcs=null; const n=noPhotoHide(r); put(r); if(await commit(r.name+": quantity on request"+n)) closeDrawer(); });
+    $("#soHide").onclick=()=>busy("soHide",async()=>{ r.hidden=true; put(r); if(await commit("Sold out, hidden from site: "+r.name)) closeDrawer(); });
+    $("#soToOrder").onclick=()=>busy("soToOrder",async()=>{ const res=stockToOrder(r); if(!isNew) state.data.STOCK.splice(i,1);
+      if(await commit(`Sold out: ${r.name} → “Brought in to order”${res.merged?" (existing card)":""}${res.hidden?" — hidden until it has a photo":""}`)) closeDrawer(); });
+  };
+  const onSave=async()=>{ const r=build(); if(!r) return; if(r.m2===0||r.pcs===0){ soldOut(r); return; } await saveNormal(r); };
+  wireFoot(onSave,onDel,onHide);
 }
 /* ---- order ---- */
 function editOrder(i){
@@ -997,6 +1067,7 @@ function editOrder(i){
      ${photoList("or",photos,{label:"Photos",main:"Card photo",hint:"The first photo is on the card. When a visitor opens the item, all of them show in this order."})}`,
     delFoot("Delete this item for good? To take it off the site but keep it, use “Hide from site”.",isNew?"":O.hidden?"Put back on site":"Hide from site"));
   wireList();
+  if(!isNew){ const b=document.createElement("button"); b.className="btn amber"; b.id="toStock"; b.textContent="Move to stock…"; $("#dfoot").insertBefore(b,$("#dfoot .sp")); b.onclick=()=>orderToStock(i); }
   const build=()=>{ const r={...O,name:V("name"),cat:V("cat"),block:V("block")||"brought in to order",note:V("note")};
     const L=listState.or.list; r.img=L[0]?L[0].img:""; r.fb=L[0]&&L[0].fb?L[0].fb:null; if(L.length>1) r.shots=L.map(p=>({img:p.img,fb:p.fb||null})); else delete r.shots;
     const sel=V("sel"); if(sel) r.sel=sel; else delete r.sel; if(V("classic")) r.classic=true; else delete r.classic; if(V("isnew")) r.isnew=true; else delete r.isnew;
@@ -1004,6 +1075,29 @@ function editOrder(i){
   wireFoot(async()=>{ const r=build(); if(!r) return; const n=noPhotoHide(r); if(isNew) state.data.ORDER.push(r); else state.data.ORDER[i]=r; if(await commit((isNew?"Added ":"Updated ")+r.name+n)) closeDrawer(); },
     isNew?null:async()=>{ state.data.ORDER.splice(i,1); if(await commit("Deleted to-order item: "+O.name)) closeDrawer(); },
     async()=>{ const r=build(); if(!r) return; if(O.hidden&&!r.img){ toast(needPhoto,true); return; } state.data.ORDER[i]=withHidden(r,!O.hidden); if(await commit((O.hidden?"Put back on site: ":"Hidden from site: ")+r.name)) closeDrawer(); });
+}
+/* ---- a to-order stone has arrived: it becomes a stock item again ---- */
+function orderToStock(i){
+  const O=clone(state.data.ORDER[i]); if(!O) return; const fs=O.fromStock||{};
+  const photos=uniqPhotos([{img:O.img,fb:O.fb},...(O.shots||[])]);
+  openDrawer("Move to stock",O.name,
+    `<p class="hint" style="margin:0">The stone has arrived: it becomes a stock item with its name, category, photos and description.${O.fromStock?" Slab size, finish and location are filled in from when it was last in stock.":""}</p>
+     <div class="grid3">${F("pcs","Slabs that arrived",fs.pcs??"",{type:"number",ph:"—"})}${F("size","Slab size",fs.size||"",{ph:"302 × 200 cm"})}${F("m2","m² available",fs.m2??"",{type:"number",step:"0.01",ph:"on request"})}</div>
+     <p class="hint" id="m2how" style="margin:-6px 0 0"></p>
+     <div class="grid2">${F("finish","Finish",fs.finish||"",{ph:"Polished"})}${locSelect("loc",fs.loc||"Dubai")}</div>
+     <label class="check"><input type="checkbox" id="f_keep"${O.classic?" checked":""}> Keep it in “Brought in to order” as well${O.classic?" (it is an always-available classic)":""}</label>`,
+    `<span class="sp"></span><button class="btn ghost" id="cancel">Cancel</button><button class="btn solid" id="tsGo">Move to stock</button>`);
+  $("#cancel").onclick=closeDrawer; wireAutoM2("pcs","size","m2","m2how",null,null);
+  $("#tsGo").onclick=()=>busy("tsGo",async()=>{
+    const k=state.data.ORDER.findIndex(o=>o.key===O.key&&sameName(o.name,O.name)); if(k<0){ toast("This item has changed. Close the panel and open it again.",true); return; }
+    const pcs=NN("pcs"), m2=NN("m2"); if(pcs===0||m2===0){ toast("Enter the slabs that arrived, or leave them empty for “quantity on request”.",true); return; }
+    const ST=state.data.STOCK, note=String(O.note||"").replace(SOLD_NOTE,"").trim();
+    const r={name:O.name,m2,pcs,size:V("size"),note,img:photos[0]?photos[0].img:"",origin:fs.origin||null,finish:V("finish")||null,gallery:photos.length>1?photos.map(p=>p.img):null,
+      cat:O.cat,key:fs.key&&!ST.some(s=>s.key===fs.key)?fs.key:nextKey(ST,"s"),grp:fs.grp||3,loc:V("loc")||"Dubai",special:false};
+    if(photos[0]&&photos[0].fb) r.fb=photos[0].fb; const n=noPhotoHide(r); ST.push(r);
+    if(V("keep")){ delete state.data.ORDER[k].fromStock; state.data.ORDER[k].note=note||state.data.ORDER[k].note; } else state.data.ORDER.splice(k,1);
+    if(await commit(`Back in stock: ${r.name}${pcs!=null?` (${pcs} slabs`+(m2!=null?`, ${fmt(m2)} m²)`:")"):""}${n}`)) closeDrawer();
+  });
 }
 /* ---- project ---- */
 function editProject(i){
